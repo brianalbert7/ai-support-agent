@@ -1,8 +1,11 @@
 package org.brian.aisupportagent.integration;
 
+import org.brian.aisupportagent.entity.DocumentStatus;
+import org.brian.aisupportagent.entity.KnowledgeDocument;
 import org.brian.aisupportagent.entity.RefreshToken;
 import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
+import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.RefreshTokenRepository;
 import org.brian.aisupportagent.repository.UserRepository;
 import org.junit.jupiter.api.Test;
@@ -19,6 +22,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers(disabledWithoutDocker = true)
@@ -41,6 +45,9 @@ class DatabaseIntegrationTest {
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
+    private KnowledgeDocumentRepository knowledgeDocumentRepository;
+
+    @Autowired
     private JdbcClient jdbcClient;
 
     @Test
@@ -49,7 +56,7 @@ class DatabaseIntegrationTest {
         Integer migrationCount = jdbcClient.sql("""
                         SELECT COUNT(*)
                         FROM flyway_schema_history
-                        WHERE version = '1'
+                        WHERE version IN ('1', '2')
                           AND success = TRUE
                         """)
                 .query(Integer.class)
@@ -71,8 +78,24 @@ class DatabaseIntegrationTest {
                 .build();
         refreshTokenRepository.saveAndFlush(refreshToken);
 
-        assertEquals(1, migrationCount);
+        KnowledgeDocument document = KnowledgeDocument.builder()
+                .displayName("Employee Handbook")
+                .originalFileName("employee-handbook.pdf")
+                .contentType("application/pdf")
+                .sizeBytes(2048)
+                .storageKey("documents/employee-handbook.pdf")
+                .checksumSha256("b".repeat(64))
+                .status(DocumentStatus.UPLOADED)
+                .uploadedBy(savedUser)
+                .build();
+        KnowledgeDocument savedDocument = knowledgeDocumentRepository.saveAndFlush(document);
+
+        assertEquals(2, migrationCount);
         assertTrue(userRepository.findByEmail("employee@example.com").isPresent());
         assertTrue(refreshTokenRepository.findByTokenHash("a".repeat(64)).isPresent());
+        assertEquals(DocumentStatus.UPLOADED, savedDocument.getStatus());
+        assertEquals(savedUser.getId(), savedDocument.getUploadedBy().getId());
+        assertNotNull(savedDocument.getCreatedAt());
+        assertNotNull(savedDocument.getUpdatedAt());
     }
 }
