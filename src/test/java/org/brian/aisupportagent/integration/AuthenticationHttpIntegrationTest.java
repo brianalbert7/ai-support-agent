@@ -3,9 +3,11 @@ package org.brian.aisupportagent.integration;
 import com.jayway.jsonpath.JsonPath;
 import org.brian.aisupportagent.entity.DocumentStatus;
 import org.brian.aisupportagent.entity.KnowledgeDocument;
+import org.brian.aisupportagent.entity.KnowledgeDocumentChunk;
 import org.brian.aisupportagent.entity.KnowledgeDocumentPage;
 import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
+import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.UserRepository;
@@ -91,6 +93,9 @@ class AuthenticationHttpIntegrationTest {
 
     @Autowired
     private KnowledgeDocumentPageRepository documentPageRepository;
+
+    @Autowired
+    private KnowledgeDocumentChunkRepository documentChunkRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -300,6 +305,8 @@ class AuthenticationHttpIntegrationTest {
                 .orElseThrow();
         List<KnowledgeDocumentPage> pages = documentPageRepository
                 .findAllByKnowledgeDocumentIdOrderByPageNumberAsc(documentId);
+        List<KnowledgeDocumentChunk> chunks = documentChunkRepository
+                .findAllByDocumentIdOrdered(documentId);
 
         assertEquals(DocumentStatus.READY, processedDocument.getStatus());
         assertEquals(3, processedDocument.getPageCount());
@@ -307,6 +314,12 @@ class AuthenticationHttpIntegrationTest {
         assertEquals(1, pages.getFirst().getPageNumber());
         assertEquals(uniqueText, pages.getFirst().getContent());
         assertEquals(3, pages.getLast().getPageNumber());
+        assertEquals(2, chunks.size());
+        assertEquals(0, chunks.getFirst().getChunkIndex());
+        assertEquals(1, chunks.getFirst().getKnowledgeDocumentPage().getPageNumber());
+        assertEquals(uniqueText, chunks.getFirst().getContent());
+        assertEquals(0, chunks.getLast().getChunkIndex());
+        assertEquals(3, chunks.getLast().getKnowledgeDocumentPage().getPageNumber());
 
         mockMvc.perform(post("/api/admin/documents/{documentId}/process", documentId)
                         .header(
@@ -340,6 +353,7 @@ class AuthenticationHttpIntegrationTest {
         assertEquals(0, documentPageRepository
                 .findAllByKnowledgeDocumentIdOrderByPageNumberAsc(documentId)
                 .size());
+        assertEquals(0, documentChunkRepository.findAllByDocumentIdOrdered(documentId).size());
     }
 
     @Test

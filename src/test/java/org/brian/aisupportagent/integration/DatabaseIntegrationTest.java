@@ -2,10 +2,12 @@ package org.brian.aisupportagent.integration;
 
 import org.brian.aisupportagent.entity.DocumentStatus;
 import org.brian.aisupportagent.entity.KnowledgeDocument;
+import org.brian.aisupportagent.entity.KnowledgeDocumentChunk;
 import org.brian.aisupportagent.entity.KnowledgeDocumentPage;
 import org.brian.aisupportagent.entity.RefreshToken;
 import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
+import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.RefreshTokenRepository;
@@ -53,6 +55,9 @@ class DatabaseIntegrationTest {
     private KnowledgeDocumentPageRepository knowledgeDocumentPageRepository;
 
     @Autowired
+    private KnowledgeDocumentChunkRepository knowledgeDocumentChunkRepository;
+
+    @Autowired
     private JdbcClient jdbcClient;
 
     @Test
@@ -61,7 +66,7 @@ class DatabaseIntegrationTest {
         Integer migrationCount = jdbcClient.sql("""
                         SELECT COUNT(*)
                         FROM flyway_schema_history
-                        WHERE version IN ('1', '2', '3', '4')
+                        WHERE version IN ('1', '2', '3', '4', '5')
                           AND success = TRUE
                         """)
                 .query(Integer.class)
@@ -104,7 +109,16 @@ class DatabaseIntegrationTest {
                 documentPage
         );
 
-        assertEquals(4, migrationCount);
+        KnowledgeDocumentChunk documentChunk = KnowledgeDocumentChunk.builder()
+                .knowledgeDocumentPage(savedPage)
+                .chunkIndex(0)
+                .content("Employees receive twenty vacation days.")
+                .build();
+        KnowledgeDocumentChunk savedChunk = knowledgeDocumentChunkRepository.saveAndFlush(
+                documentChunk
+        );
+
+        assertEquals(5, migrationCount);
         assertTrue(userRepository.findByEmail("employee@example.com").isPresent());
         assertTrue(refreshTokenRepository.findByTokenHash("a".repeat(64)).isPresent());
         assertEquals(DocumentStatus.UPLOADED, savedDocument.getStatus());
@@ -114,5 +128,8 @@ class DatabaseIntegrationTest {
         assertEquals(1, savedPage.getPageNumber());
         assertEquals(savedDocument.getId(), savedPage.getKnowledgeDocument().getId());
         assertNotNull(savedPage.getCreatedAt());
+        assertEquals(0, savedChunk.getChunkIndex());
+        assertEquals(savedPage.getId(), savedChunk.getKnowledgeDocumentPage().getId());
+        assertNotNull(savedChunk.getCreatedAt());
     }
 }
