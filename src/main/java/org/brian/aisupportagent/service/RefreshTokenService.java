@@ -32,6 +32,7 @@ public class RefreshTokenService {
     public String createRefreshToken(User user) {
 
         refreshTokenRepository.deleteByUser(user);
+        refreshTokenRepository.flush();
         return issueToken(user);
     }
 

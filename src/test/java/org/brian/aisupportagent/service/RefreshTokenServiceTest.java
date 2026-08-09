@@ -41,6 +41,7 @@ class RefreshTokenServiceTest {
 
         ArgumentCaptor<RefreshToken> tokenCaptor = ArgumentCaptor.forClass(RefreshToken.class);
         verify(refreshTokenRepository).deleteByUser(user);
+        verify(refreshTokenRepository).flush();
         verify(refreshTokenRepository).save(tokenCaptor.capture());
 
         RefreshToken storedToken = tokenCaptor.getValue();
