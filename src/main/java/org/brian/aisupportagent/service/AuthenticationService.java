@@ -8,8 +8,9 @@ import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.exception.EmailAlreadyExistsException;
 import org.brian.aisupportagent.repository.UserRepository;
-import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ public class AuthenticationService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final AuthenticationManager authenticationManager;
 
     // 1. REGISTER FLOW
     @Transactional
@@ -59,14 +61,11 @@ public class AuthenticationService {
 
     // 2. LOGIN FLOW
     public AuthenticationResponse login(LoginRequest request) {
-        // Find user by email
-        User user = userRepository.findByEmail(request.email())
-                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
-
-        // Validate BCrypt password match
-        if (!passwordEncoder.matches(request.password(), user.getPassword())) {
-            throw new BadCredentialsException("Invalid password");
-        }
+        String normalizedEmail = request.email().trim().toLowerCase(Locale.ROOT);
+        Authentication authentication = authenticationManager.authenticate(
+                UsernamePasswordAuthenticationToken.unauthenticated(normalizedEmail, request.password())
+        );
+        User user = (User) authentication.getPrincipal();
 
         // Generate tokens upon successful validation
         String accessToken = jwtService.generateToken(user);

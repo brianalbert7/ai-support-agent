@@ -2,6 +2,7 @@ package org.brian.aisupportagent.config;
 
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.security.JwtAuthenticationFilter;
+import org.brian.aisupportagent.security.JwtAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -23,6 +24,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
     private final UserDetailsService userDetailsService;
     private final PasswordEncoder passwordEncoder;
 
@@ -42,6 +44,10 @@ public class SecurityConfig {
                 // 3. Configure Stateless Sessions (no HTTP Session cookies will be stored)
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
+
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(jwtAuthenticationEntryPoint)
                 )
 
                 // 4. Hook up our custom database authentication checker

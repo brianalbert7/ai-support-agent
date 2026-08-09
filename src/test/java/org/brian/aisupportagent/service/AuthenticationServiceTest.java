@@ -1,6 +1,7 @@
 package org.brian.aisupportagent.service;
 
 import org.brian.aisupportagent.dto.auth.AuthenticationResponse;
+import org.brian.aisupportagent.dto.auth.LoginRequest;
 import org.brian.aisupportagent.dto.auth.RegisterRequest;
 import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
@@ -12,6 +13,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,6 +40,9 @@ class AuthenticationServiceTest {
 
     @Mock
     private JwtService jwtService;
+
+    @Mock
+    private AuthenticationManager authenticationManager;
 
     @InjectMocks
     private AuthenticationService authenticationService;
@@ -100,5 +108,48 @@ class AuthenticationServiceTest {
 
         assertEquals("new-access-token", response.accessToken());
         assertEquals("new-refresh-token", response.refreshToken());
+    }
+
+    @Test
+    void authenticatesNormalizedCredentialsBeforeIssuingTokens() {
+        LoginRequest request = new LoginRequest(
+                "  Employee@Example.COM  ",
+                "plain-password"
+        );
+        User user = User.builder()
+                .email("employee@example.com")
+                .role(Role.EMPLOYEE)
+                .build();
+        Authentication authenticatedUser = UsernamePasswordAuthenticationToken.authenticated(
+                user,
+                null,
+                user.getAuthorities()
+        );
+        when(authenticationManager.authenticate(org.mockito.ArgumentMatchers.any(Authentication.class)))
+                .thenReturn(authenticatedUser);
+        when(jwtService.generateToken(user)).thenReturn("access-token");
+        when(refreshTokenService.createRefreshToken(user)).thenReturn("refresh-token");
+
+        AuthenticationResponse response = authenticationService.login(request);
+
+        ArgumentCaptor<Authentication> authenticationCaptor = ArgumentCaptor.forClass(Authentication.class);
+        verify(authenticationManager).authenticate(authenticationCaptor.capture());
+        Authentication authenticationRequest = authenticationCaptor.getValue();
+
+        assertEquals("employee@example.com", authenticationRequest.getPrincipal());
+        assertEquals("plain-password", authenticationRequest.getCredentials());
+        assertEquals("access-token", response.accessToken());
+        assertEquals("refresh-token", response.refreshToken());
+    }
+
+    @Test
+    void doesNotIssueTokensWhenCredentialsAreRejected() {
+        LoginRequest request = new LoginRequest("employee@example.com", "wrong-password");
+        when(authenticationManager.authenticate(org.mockito.ArgumentMatchers.any(Authentication.class)))
+                .thenThrow(new BadCredentialsException("Bad credentials"));
+
+        assertThrows(BadCredentialsException.class, () -> authenticationService.login(request));
+
+        verifyNoInteractions(jwtService, refreshTokenService);
     }
 }

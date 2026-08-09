@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.brian.aisupportagent.dto.error.ApiErrorResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -64,6 +65,23 @@ public class GlobalExceptionHandler {
                 HttpStatus.UNAUTHORIZED.value(),
                 "INVALID_REFRESH_TOKEN",
                 exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiErrorResponse> handleAuthentication(
+            AuthenticationException exception,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.UNAUTHORIZED.value(),
+                "INVALID_CREDENTIALS",
+                "Invalid email or password",
                 request.getRequestURI(),
                 Map.of()
         );

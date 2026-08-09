@@ -4,37 +4,47 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import org.brian.aisupportagent.config.JwtProperties;
 import org.brian.aisupportagent.entity.User;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.UUID;
 import java.util.function.Function;
 
 @Service
 public class JwtService {
 
-    // Must be a Base64-encoded string that is at least 256 bits (32 bytes) long
-    @Value("${JWT_SECRET}")
-    private String secretKeyString;
+    private static final String TOKEN_TYPE_CLAIM = "token_type";
+    private static final String ACCESS_TOKEN_TYPE = "access";
 
-    // Token valid for 24 hours (in milliseconds)
-    private final long jwtExpiration = 86400000;
+    private final JwtProperties properties;
+    private final Clock clock;
+    private final SecretKey signingKey;
+
+    public JwtService(JwtProperties properties, Clock clock) {
+        this.properties = properties;
+        this.clock = clock;
+        this.signingKey = createSigningKey(properties.secret());
+    }
 
     // 1. Generate Token using User entity data
     public String generateToken(User user) {
-        Map<String, Object> extraClaims = new HashMap<>();
-        extraClaims.put("role", user.getRole()); // Adds custom user fields to the payload
+        Instant issuedAt = clock.instant();
+        Instant expiresAt = issuedAt.plus(properties.accessTokenExpiration());
 
         return Jwts.builder()
-                .claims(extraClaims)
-                .subject(user.getEmail()) // Uses email as the username anchor
-                .issuedAt(new Date(System.currentTimeMillis()))
-                .expiration(new Date(System.currentTimeMillis() + jwtExpiration))
-                .signWith(getSigningKey())
+                .id(UUID.randomUUID().toString())
+                .issuer(properties.issuer())
+                .subject(user.getEmail())
+                .claim("role", user.getRole().name())
+                .claim(TOKEN_TYPE_CLAIM, ACCESS_TOKEN_TYPE)
+                .issuedAt(Date.from(issuedAt))
+                .expiration(Date.from(expiresAt))
+                .signWith(signingKey)
                 .compact();
     }
 
@@ -45,19 +55,9 @@ public class JwtService {
 
     // 3. Validate if the token belongs to the user and is not expired
     public boolean isTokenValid(String token, User user) {
-        final String username = extractUsername(token);
-        return (username.equals(user.getEmail())) && !isTokenExpired(token);
-    }
-
-    // 4. Check if the token has expired
-    public boolean isTokenExpired(String token) {
-        return extractExpiration(token).before(new Date());
-    }
-
-    // --- Helper Methods ---
-
-    private Date extractExpiration(String token) {
-        return extractClaim(token, Claims::getExpiration);
+        Claims claims = extractAllClaims(token);
+        return user.getEmail().equals(claims.getSubject())
+                && ACCESS_TOKEN_TYPE.equals(claims.get(TOKEN_TYPE_CLAIM, String.class));
     }
 
     public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
@@ -67,14 +67,23 @@ public class JwtService {
 
     private Claims extractAllClaims(String token) {
         return Jwts.parser()
-                .verifyWith(getSigningKey())
+                .verifyWith(signingKey)
+                .requireIssuer(properties.issuer())
+                .clock(() -> Date.from(clock.instant()))
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
     }
 
-    private SecretKey getSigningKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(secretKeyString);
-        return Keys.hmacShaKeyFor(keyBytes);
+    private SecretKey createSigningKey(String encodedSecret) {
+        try {
+            byte[] keyBytes = Decoders.BASE64.decode(encodedSecret);
+            return Keys.hmacShaKeyFor(keyBytes);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException(
+                    "JWT secret must be valid Base64 containing at least 32 random bytes",
+                    exception
+            );
+        }
     }
 }
