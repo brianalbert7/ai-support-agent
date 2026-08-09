@@ -8,4 +8,6 @@ import java.util.UUID;
 
 @Repository
 public interface KnowledgeDocumentRepository extends JpaRepository<KnowledgeDocument, UUID> {
+
+    boolean existsByChecksumSha256(String checksumSha256);
 }

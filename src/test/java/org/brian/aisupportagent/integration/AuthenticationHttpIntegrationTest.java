@@ -1,8 +1,11 @@
 package org.brian.aisupportagent.integration;
 
 import com.jayway.jsonpath.JsonPath;
+import org.brian.aisupportagent.entity.DocumentStatus;
+import org.brian.aisupportagent.entity.KnowledgeDocument;
 import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
+import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +15,9 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.junit.jupiter.Container;
@@ -20,7 +26,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.ObjectMapper;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
 
@@ -29,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.hasItems;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -42,12 +53,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AuthenticationHttpIntegrationTest {
 
     private static final String PASSWORD = "StrongPassword123!";
+    private static final Path DOCUMENT_STORAGE_DIRECTORY = Path.of(
+            System.getProperty("java.io.tmpdir"),
+            "ai-support-agent-tests-" + UUID.randomUUID()
+    );
 
     @Container
     @ServiceConnection
     static final PostgreSQLContainer postgres = new PostgreSQLContainer(
             DockerImageName.parse("postgres:16-alpine")
     );
+
+    @DynamicPropertySource
+    static void documentStorageProperties(DynamicPropertyRegistry registry) {
+        registry.add(
+                "app.storage.documents.directory",
+                () -> DOCUMENT_STORAGE_DIRECTORY.toString()
+        );
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -57,6 +80,9 @@ class AuthenticationHttpIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private KnowledgeDocumentRepository documentRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -178,6 +204,87 @@ class AuthenticationHttpIntegrationTest {
                 .andExpect(jsonPath("$[0].password").doesNotExist());
     }
 
+    @Test
+    void documentUploadForbidsEmployeesAndStoresAdminPdf() throws Exception {
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        byte[] pdfContent = ("%PDF-1.4\nportfolio-test-" + UUID.randomUUID())
+                .getBytes(StandardCharsets.US_ASCII);
+
+        mockMvc.perform(multipart("/api/admin/documents")
+                        .file(pdfFile("employee-handbook.pdf", pdfContent))
+                        .param("displayName", "Employee Handbook")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(employeeTokens.accessToken())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/admin/documents")
+                        .file(pdfFile("employee-handbook.pdf", pdfContent))
+                        .param("displayName", "Employee Handbook")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminTokens.accessToken())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.displayName").value("Employee Handbook"))
+                .andExpect(jsonPath("$.originalFileName").value("employee-handbook.pdf"))
+                .andExpect(jsonPath("$.contentType").value(MediaType.APPLICATION_PDF_VALUE))
+                .andExpect(jsonPath("$.sizeBytes").value(pdfContent.length))
+                .andExpect(jsonPath("$.status").value("UPLOADED"))
+                .andExpect(jsonPath("$.storageKey").doesNotExist())
+                .andReturn();
+
+        String responseBody = new String(
+                uploadResult.getResponse().getContentAsByteArray(),
+                StandardCharsets.UTF_8
+        );
+        UUID documentId = UUID.fromString(JsonPath.read(responseBody, "$.id"));
+        KnowledgeDocument storedDocument = documentRepository.findById(documentId).orElseThrow();
+
+        assertEquals(DocumentStatus.UPLOADED, storedDocument.getStatus());
+        assertEquals(sha256(pdfContent), storedDocument.getChecksumSha256());
+        assertTrue(Files.exists(
+                DOCUMENT_STORAGE_DIRECTORY.resolve(storedDocument.getStorageKey())
+        ));
+
+        mockMvc.perform(multipart("/api/admin/documents")
+                        .file(pdfFile("same-content-different-name.pdf", pdfContent))
+                        .param("displayName", "Duplicate Handbook")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminTokens.accessToken())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DOCUMENT_ALREADY_EXISTS"));
+
+        assertEquals(1, documentRepository.count());
+        try (var storedFiles = Files.list(DOCUMENT_STORAGE_DIRECTORY)) {
+            assertEquals(1, storedFiles.filter(path -> path.toString().endsWith(".pdf")).count());
+        }
+    }
+
+    @Test
+    void documentUploadRejectsFakePdfContent() throws Exception {
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+
+        mockMvc.perform(multipart("/api/admin/documents")
+                        .file(pdfFile(
+                                "valid.pdf",
+                                "%PDF-1.4\nvalid".getBytes(StandardCharsets.US_ASCII)
+                        ))
+                        .param("displayName", " ")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminTokens.accessToken())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors.displayName")
+                        .value("Display name is required"));
+
+        mockMvc.perform(multipart("/api/admin/documents")
+                        .file(pdfFile(
+                                "not-really-a-pdf.pdf",
+                                "plain text".getBytes(StandardCharsets.UTF_8)
+                        ))
+                        .param("displayName", "Fake PDF")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminTokens.accessToken())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_DOCUMENT"))
+                .andExpect(jsonPath("$.message").value("The uploaded file is not a valid PDF"));
+    }
+
     private AuthenticationTokens register(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -208,6 +315,29 @@ class AuthenticationHttpIntegrationTest {
                 .andReturn();
 
         return readTokens(result);
+    }
+
+    private AuthenticationTokens registerAdmin(String email) throws Exception {
+        register(email);
+        User admin = userRepository.findByEmail(email).orElseThrow();
+        admin.setRole(Role.ADMIN);
+        userRepository.saveAndFlush(admin);
+        return login(email, PASSWORD);
+    }
+
+    private MockMultipartFile pdfFile(String filename, byte[] content) {
+        return new MockMultipartFile(
+                "file",
+                filename,
+                MediaType.APPLICATION_PDF_VALUE,
+                content
+        );
+    }
+
+    private String sha256(byte[] content) throws Exception {
+        return HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(content)
+        );
     }
 
     private AuthenticationTokens readTokens(MvcResult result) {

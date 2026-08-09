@@ -56,7 +56,7 @@ class DatabaseIntegrationTest {
         Integer migrationCount = jdbcClient.sql("""
                         SELECT COUNT(*)
                         FROM flyway_schema_history
-                        WHERE version IN ('1', '2')
+                        WHERE version IN ('1', '2', '3')
                           AND success = TRUE
                         """)
                 .query(Integer.class)
@@ -90,7 +90,7 @@ class DatabaseIntegrationTest {
                 .build();
         KnowledgeDocument savedDocument = knowledgeDocumentRepository.saveAndFlush(document);
 
-        assertEquals(2, migrationCount);
+        assertEquals(3, migrationCount);
         assertTrue(userRepository.findByEmail("employee@example.com").isPresent());
         assertTrue(refreshTokenRepository.findByTokenHash("a".repeat(64)).isPresent());
         assertEquals(DocumentStatus.UPLOADED, savedDocument.getStatus());
