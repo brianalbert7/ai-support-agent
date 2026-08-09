@@ -8,10 +8,12 @@ import org.brian.aisupportagent.entity.RefreshToken;
 import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
+import org.brian.aisupportagent.repository.ChunkEmbeddingRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.RefreshTokenRepository;
 import org.brian.aisupportagent.repository.UserRepository;
+import org.brian.aisupportagent.service.ChunkEmbedding;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +26,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -39,7 +42,8 @@ class DatabaseIntegrationTest {
     @Container
     @ServiceConnection
     static final PostgreSQLContainer postgres = new PostgreSQLContainer(
-            DockerImageName.parse("postgres:16-alpine")
+            DockerImageName.parse("pgvector/pgvector:0.8.2-pg16")
+                    .asCompatibleSubstituteFor("postgres")
     );
 
     @Autowired
@@ -58,6 +62,9 @@ class DatabaseIntegrationTest {
     private KnowledgeDocumentChunkRepository knowledgeDocumentChunkRepository;
 
     @Autowired
+    private ChunkEmbeddingRepository chunkEmbeddingRepository;
+
+    @Autowired
     private JdbcClient jdbcClient;
 
     @Test
@@ -66,7 +73,7 @@ class DatabaseIntegrationTest {
         Integer migrationCount = jdbcClient.sql("""
                         SELECT COUNT(*)
                         FROM flyway_schema_history
-                        WHERE version IN ('1', '2', '3', '4', '5')
+                        WHERE version IN ('1', '2', '3', '4', '5', '6')
                           AND success = TRUE
                         """)
                 .query(Integer.class)
@@ -117,8 +124,20 @@ class DatabaseIntegrationTest {
         KnowledgeDocumentChunk savedChunk = knowledgeDocumentChunkRepository.saveAndFlush(
                 documentChunk
         );
+        chunkEmbeddingRepository.saveAll(List.of(
+                new ChunkEmbedding(savedChunk, testEmbeddingVector())
+        ));
 
-        assertEquals(5, migrationCount);
+        Integer storedDimensions = jdbcClient.sql("""
+                        SELECT vector_dims(embedding)
+                        FROM knowledge_document_chunks
+                        WHERE id = :chunkId
+                        """)
+                .param("chunkId", savedChunk.getId())
+                .query(Integer.class)
+                .single();
+
+        assertEquals(6, migrationCount);
         assertTrue(userRepository.findByEmail("employee@example.com").isPresent());
         assertTrue(refreshTokenRepository.findByTokenHash("a".repeat(64)).isPresent());
         assertEquals(DocumentStatus.UPLOADED, savedDocument.getStatus());
@@ -131,5 +150,15 @@ class DatabaseIntegrationTest {
         assertEquals(0, savedChunk.getChunkIndex());
         assertEquals(savedPage.getId(), savedChunk.getKnowledgeDocumentPage().getId());
         assertNotNull(savedChunk.getCreatedAt());
+        assertEquals(1536, storedDimensions);
+        assertEquals(1, chunkEmbeddingRepository.countEmbeddedByDocumentId(
+                savedDocument.getId()
+        ));
+    }
+
+    private float[] testEmbeddingVector() {
+        float[] vector = new float[1536];
+        vector[0] = 1.0f;
+        return vector;
     }
 }

@@ -11,9 +11,11 @@ import org.brian.aisupportagent.exception.DocumentChunkingException;
 import org.brian.aisupportagent.exception.DocumentProcessingException;
 import org.brian.aisupportagent.exception.DocumentStorageException;
 import org.brian.aisupportagent.exception.DuplicateDocumentException;
+import org.brian.aisupportagent.exception.EmbeddingGenerationException;
 import org.brian.aisupportagent.exception.InvalidDocumentStateException;
 import org.brian.aisupportagent.exception.KnowledgeDocumentNotFoundException;
 import org.brian.aisupportagent.exception.PdfExtractionException;
+import org.brian.aisupportagent.repository.ChunkEmbeddingRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
@@ -39,10 +41,12 @@ public class KnowledgeDocumentService {
     private final KnowledgeDocumentRepository documentRepository;
     private final KnowledgeDocumentPageRepository documentPageRepository;
     private final KnowledgeDocumentChunkRepository documentChunkRepository;
+    private final ChunkEmbeddingRepository chunkEmbeddingRepository;
     private final DocumentStorageService storageService;
     private final DocumentFileValidator fileValidator;
     private final PdfTextExtractionService pdfTextExtractionService;
     private final DocumentChunkingService documentChunkingService;
+    private final DocumentEmbeddingService documentEmbeddingService;
 
     @PreAuthorize("hasRole('ADMIN')")
     @Transactional
@@ -94,14 +98,21 @@ public class KnowledgeDocumentService {
 
         PdfExtractionResult extractionResult;
         List<ChunkedPage> chunkedPages;
+        List<KnowledgeDocumentPage> pages;
+        List<KnowledgeDocumentChunk> chunks;
+        List<ChunkEmbedding> embeddings;
         try {
             extractionResult = pdfTextExtractionService.extract(
                     storageService.load(document.getStorageKey())
             );
             chunkedPages = chunkPages(extractionResult.pages());
+            pages = toPageEntities(document, chunkedPages);
+            chunks = toChunkEntities(pages, chunkedPages);
+            embeddings = documentEmbeddingService.embed(chunks);
         } catch (DocumentStorageException
                  | PdfExtractionException
-                 | DocumentChunkingException exception) {
+                 | DocumentChunkingException
+                 | EmbeddingGenerationException exception) {
             document.setStatus(DocumentStatus.FAILED);
             document.setFailureReason(processingFailureReason(exception));
             documentRepository.saveAndFlush(document);
@@ -109,15 +120,9 @@ public class KnowledgeDocumentService {
         }
 
         documentPageRepository.deleteAllByKnowledgeDocumentId(documentId);
-        List<KnowledgeDocumentPage> pages = chunkedPages.stream()
-                .map(chunkedPage -> KnowledgeDocumentPage.builder()
-                        .knowledgeDocument(document)
-                        .pageNumber(chunkedPage.page().pageNumber())
-                        .content(chunkedPage.page().content())
-                        .build())
-                .toList();
-        List<KnowledgeDocumentPage> savedPages = documentPageRepository.saveAllAndFlush(pages);
-        documentChunkRepository.saveAllAndFlush(toChunkEntities(savedPages, chunkedPages));
+        documentPageRepository.saveAllAndFlush(pages);
+        documentChunkRepository.saveAllAndFlush(chunks);
+        chunkEmbeddingRepository.saveAll(embeddings);
 
         document.setPageCount(extractionResult.pageCount());
         document.setStatus(DocumentStatus.READY);
@@ -150,11 +155,24 @@ public class KnowledgeDocumentService {
         return chunkedPages;
     }
 
-    private List<KnowledgeDocumentChunk> toChunkEntities(
-            List<KnowledgeDocumentPage> savedPages,
+    private List<KnowledgeDocumentPage> toPageEntities(
+            KnowledgeDocument document,
             List<ChunkedPage> chunkedPages
     ) {
-        Map<Integer, KnowledgeDocumentPage> pagesByNumber = savedPages.stream()
+        return chunkedPages.stream()
+                .map(chunkedPage -> KnowledgeDocumentPage.builder()
+                        .knowledgeDocument(document)
+                        .pageNumber(chunkedPage.page().pageNumber())
+                        .content(chunkedPage.page().content())
+                        .build())
+                .toList();
+    }
+
+    private List<KnowledgeDocumentChunk> toChunkEntities(
+            List<KnowledgeDocumentPage> pages,
+            List<ChunkedPage> chunkedPages
+    ) {
+        Map<Integer, KnowledgeDocumentPage> pagesByNumber = pages.stream()
                 .collect(Collectors.toMap(
                         KnowledgeDocumentPage::getPageNumber,
                         Function.identity()
@@ -162,14 +180,14 @@ public class KnowledgeDocumentService {
         List<KnowledgeDocumentChunk> chunks = new ArrayList<>();
 
         for (ChunkedPage chunkedPage : chunkedPages) {
-            KnowledgeDocumentPage savedPage = pagesByNumber.get(
+            KnowledgeDocumentPage page = pagesByNumber.get(
                     chunkedPage.page().pageNumber()
             );
             for (int chunkIndex = 0;
                  chunkIndex < chunkedPage.chunks().size();
                  chunkIndex++) {
                 chunks.add(KnowledgeDocumentChunk.builder()
-                        .knowledgeDocumentPage(savedPage)
+                        .knowledgeDocumentPage(page)
                         .chunkIndex(chunkIndex)
                         .content(chunkedPage.chunks().get(chunkIndex))
                         .build());

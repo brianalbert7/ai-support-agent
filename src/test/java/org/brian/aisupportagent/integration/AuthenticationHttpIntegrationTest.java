@@ -8,11 +8,13 @@ import org.brian.aisupportagent.entity.KnowledgeDocumentPage;
 import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
+import org.brian.aisupportagent.repository.ChunkEmbeddingRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -21,6 +23,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -50,6 +53,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.when;
 
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(properties = {
@@ -68,7 +73,8 @@ class AuthenticationHttpIntegrationTest {
     @Container
     @ServiceConnection
     static final PostgreSQLContainer postgres = new PostgreSQLContainer(
-            DockerImageName.parse("postgres:16-alpine")
+            DockerImageName.parse("pgvector/pgvector:0.8.2-pg16")
+                    .asCompatibleSubstituteFor("postgres")
     );
 
     @DynamicPropertySource
@@ -96,6 +102,12 @@ class AuthenticationHttpIntegrationTest {
 
     @Autowired
     private KnowledgeDocumentChunkRepository documentChunkRepository;
+
+    @Autowired
+    private ChunkEmbeddingRepository chunkEmbeddingRepository;
+
+    @MockitoBean
+    private EmbeddingModel embeddingModel;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -273,6 +285,12 @@ class AuthenticationHttpIntegrationTest {
     @Test
     void adminProcessesPdfIntoPageRecordsAndCannotProcessReadyDocumentAgain()
             throws Exception {
+        when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
+            List<String> inputs = invocation.getArgument(0);
+            return inputs.stream()
+                    .map(input -> testEmbeddingVector())
+                    .toList();
+        });
         AuthenticationTokens employeeTokens = register(uniqueEmail());
         AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
         String uniqueText = "vacation policy " + UUID.randomUUID();
@@ -320,6 +338,7 @@ class AuthenticationHttpIntegrationTest {
         assertEquals(uniqueText, chunks.getFirst().getContent());
         assertEquals(0, chunks.getLast().getChunkIndex());
         assertEquals(3, chunks.getLast().getKnowledgeDocumentPage().getPageNumber());
+        assertEquals(2, chunkEmbeddingRepository.countEmbeddedByDocumentId(documentId));
 
         mockMvc.perform(post("/api/admin/documents/{documentId}/process", documentId)
                         .header(
@@ -354,6 +373,35 @@ class AuthenticationHttpIntegrationTest {
                 .findAllByKnowledgeDocumentIdOrderByPageNumberAsc(documentId)
                 .size());
         assertEquals(0, documentChunkRepository.findAllByDocumentIdOrdered(documentId).size());
+    }
+
+    @Test
+    void embeddingFailureCommitsFailedStatusWithoutPartialSearchData() throws Exception {
+        when(embeddingModel.embed(anyList())).thenThrow(
+                new IllegalStateException("Simulated embedding provider failure")
+        );
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        byte[] pdfContent = pdfWithPages(
+                "This page contains enough searchable support policy text."
+        );
+        UUID documentId = uploadDocument(adminTokens, "Embedding Failure", pdfContent);
+
+        mockMvc.perform(post("/api/admin/documents/{documentId}/process", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("DOCUMENT_PROCESSING_FAILED"));
+
+        KnowledgeDocument failedDocument = documentRepository.findById(documentId)
+                .orElseThrow();
+        assertEquals(DocumentStatus.FAILED, failedDocument.getStatus());
+        assertEquals(0, documentPageRepository
+                .findAllByKnowledgeDocumentIdOrderByPageNumberAsc(documentId)
+                .size());
+        assertEquals(0, documentChunkRepository.findAllByDocumentIdOrdered(documentId).size());
+        assertEquals(0, chunkEmbeddingRepository.countEmbeddedByDocumentId(documentId));
     }
 
     @Test
@@ -443,6 +491,12 @@ class AuthenticationHttpIntegrationTest {
         try (var storedFiles = Files.list(DOCUMENT_STORAGE_DIRECTORY)) {
             return storedFiles.filter(path -> path.toString().endsWith(".pdf")).count();
         }
+    }
+
+    private float[] testEmbeddingVector() {
+        float[] vector = new float[1536];
+        vector[0] = 1.0f;
+        return vector;
     }
 
     private AuthenticationTokens login(String email, String password) throws Exception {
