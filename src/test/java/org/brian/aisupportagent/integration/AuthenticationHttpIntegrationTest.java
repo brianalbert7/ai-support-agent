@@ -27,6 +27,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.hamcrest.Matchers.hasItems;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -151,6 +152,32 @@ class AuthenticationHttpIntegrationTest {
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
+    @Test
+    void adminEndpointForbidsEmployeesAndAllowsAdmins() throws Exception {
+        String employeeEmail = uniqueEmail();
+        AuthenticationTokens employeeTokens = register(employeeEmail);
+
+        String adminEmail = uniqueEmail();
+        register(adminEmail);
+        User admin = userRepository.findByEmail(adminEmail).orElseThrow();
+        admin.setRole(Role.ADMIN);
+        userRepository.saveAndFlush(admin);
+        AuthenticationTokens adminTokens = login(adminEmail, PASSWORD);
+
+        mockMvc.perform(get("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(employeeTokens.accessToken())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.message")
+                        .value("You do not have permission to access this resource"));
+
+        mockMvc.perform(get("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(adminTokens.accessToken())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].email", hasItems(employeeEmail, adminEmail)))
+                .andExpect(jsonPath("$[0].password").doesNotExist());
+    }
+
     private AuthenticationTokens register(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -161,6 +188,21 @@ class AuthenticationHttpIntegrationTest {
                                 "password", PASSWORD
                         ))))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
+                .andReturn();
+
+        return readTokens(result);
+    }
+
+    private AuthenticationTokens login(String email, String password) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "email", email,
+                                "password", password
+                        ))))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.refreshToken").isNotEmpty())
                 .andReturn();
