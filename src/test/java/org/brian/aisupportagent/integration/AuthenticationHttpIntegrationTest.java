@@ -3,9 +3,11 @@ package org.brian.aisupportagent.integration;
 import com.jayway.jsonpath.JsonPath;
 import org.brian.aisupportagent.entity.DocumentStatus;
 import org.brian.aisupportagent.entity.KnowledgeDocument;
+import org.brian.aisupportagent.entity.KnowledgeDocumentPage;
 import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
+import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,12 +34,15 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.hasItems;
+import static org.brian.aisupportagent.util.PdfTestData.pdfWithPages;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -83,6 +88,9 @@ class AuthenticationHttpIntegrationTest {
 
     @Autowired
     private KnowledgeDocumentRepository documentRepository;
+
+    @Autowired
+    private KnowledgeDocumentPageRepository documentPageRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -206,6 +214,8 @@ class AuthenticationHttpIntegrationTest {
 
     @Test
     void documentUploadForbidsEmployeesAndStoresAdminPdf() throws Exception {
+        long documentCountBefore = documentRepository.count();
+        long storedPdfCountBefore = storedPdfCount();
         AuthenticationTokens employeeTokens = register(uniqueEmail());
         AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
         byte[] pdfContent = ("%PDF-1.4\nportfolio-test-" + UUID.randomUUID())
@@ -251,10 +261,98 @@ class AuthenticationHttpIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("DOCUMENT_ALREADY_EXISTS"));
 
-        assertEquals(1, documentRepository.count());
-        try (var storedFiles = Files.list(DOCUMENT_STORAGE_DIRECTORY)) {
-            assertEquals(1, storedFiles.filter(path -> path.toString().endsWith(".pdf")).count());
-        }
+        assertEquals(documentCountBefore + 1, documentRepository.count());
+        assertEquals(storedPdfCountBefore + 1, storedPdfCount());
+    }
+
+    @Test
+    void adminProcessesPdfIntoPageRecordsAndCannotProcessReadyDocumentAgain()
+            throws Exception {
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        String uniqueText = "vacation policy " + UUID.randomUUID();
+        byte[] pdfContent = pdfWithPages(
+                uniqueText,
+                "",
+                "reset a customer password from the account settings page"
+        );
+        UUID documentId = uploadDocument(adminTokens, "Support Handbook", pdfContent);
+
+        mockMvc.perform(post("/api/admin/documents/{documentId}/process", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        mockMvc.perform(post("/api/admin/documents/{documentId}/process", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(documentId.toString()))
+                .andExpect(jsonPath("$.status").value("READY"))
+                .andExpect(jsonPath("$.pageCount").value(3));
+
+        KnowledgeDocument processedDocument = documentRepository.findById(documentId)
+                .orElseThrow();
+        List<KnowledgeDocumentPage> pages = documentPageRepository
+                .findAllByKnowledgeDocumentIdOrderByPageNumberAsc(documentId);
+
+        assertEquals(DocumentStatus.READY, processedDocument.getStatus());
+        assertEquals(3, processedDocument.getPageCount());
+        assertEquals(2, pages.size());
+        assertEquals(1, pages.getFirst().getPageNumber());
+        assertEquals(uniqueText, pages.getFirst().getContent());
+        assertEquals(3, pages.getLast().getPageNumber());
+
+        mockMvc.perform(post("/api/admin/documents/{documentId}/process", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INVALID_DOCUMENT_STATE"));
+    }
+
+    @Test
+    void processingInvalidPdfCommitsFailedStatus() throws Exception {
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        byte[] invalidPdf = ("%PDF-1.4\nbroken-" + UUID.randomUUID())
+                .getBytes(StandardCharsets.US_ASCII);
+        UUID documentId = uploadDocument(adminTokens, "Broken PDF", invalidPdf);
+
+        mockMvc.perform(post("/api/admin/documents/{documentId}/process", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("DOCUMENT_PROCESSING_FAILED"))
+                .andExpect(jsonPath("$.message").value("The PDF could not be processed"));
+
+        KnowledgeDocument failedDocument = documentRepository.findById(documentId)
+                .orElseThrow();
+        assertEquals(DocumentStatus.FAILED, failedDocument.getStatus());
+        assertNotNull(failedDocument.getFailureReason());
+        assertEquals(0, documentPageRepository
+                .findAllByKnowledgeDocumentIdOrderByPageNumberAsc(documentId)
+                .size());
+    }
+
+    @Test
+    void processingUnknownDocumentReturnsNotFound() throws Exception {
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+
+        mockMvc.perform(post("/api/admin/documents/{documentId}/process", UUID.randomUUID())
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("DOCUMENT_NOT_FOUND"));
     }
 
     @Test
@@ -300,6 +398,37 @@ class AuthenticationHttpIntegrationTest {
                 .andReturn();
 
         return readTokens(result);
+    }
+
+    private UUID uploadDocument(
+            AuthenticationTokens adminTokens,
+            String displayName,
+            byte[] content
+    ) throws Exception {
+        MvcResult result = mockMvc.perform(multipart("/api/admin/documents")
+                        .file(pdfFile("knowledge.pdf", content))
+                        .param("displayName", displayName)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String responseBody = new String(
+                result.getResponse().getContentAsByteArray(),
+                StandardCharsets.UTF_8
+        );
+        return UUID.fromString(JsonPath.read(responseBody, "$.id"));
+    }
+
+    private long storedPdfCount() throws Exception {
+        if (Files.notExists(DOCUMENT_STORAGE_DIRECTORY)) {
+            return 0;
+        }
+        try (var storedFiles = Files.list(DOCUMENT_STORAGE_DIRECTORY)) {
+            return storedFiles.filter(path -> path.toString().endsWith(".pdf")).count();
+        }
     }
 
     private AuthenticationTokens login(String email, String password) throws Exception {

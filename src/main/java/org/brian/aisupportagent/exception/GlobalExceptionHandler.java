@@ -183,4 +183,55 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
+
+    @ExceptionHandler(KnowledgeDocumentNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleKnowledgeDocumentNotFound(
+            KnowledgeDocumentNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.NOT_FOUND.value(),
+                "DOCUMENT_NOT_FOUND",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
+
+    @ExceptionHandler(InvalidDocumentStateException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidDocumentState(
+            InvalidDocumentStateException exception,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.CONFLICT.value(),
+                "INVALID_DOCUMENT_STATE",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(DocumentProcessingException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentProcessing(
+            DocumentProcessingException exception,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.UNPROCESSABLE_ENTITY.value(),
+                "DOCUMENT_PROCESSING_FAILED",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
+    }
 }

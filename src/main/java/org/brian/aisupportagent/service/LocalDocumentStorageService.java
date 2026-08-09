@@ -2,6 +2,8 @@ package org.brian.aisupportagent.service;
 
 import org.brian.aisupportagent.config.DocumentStorageProperties;
 import org.brian.aisupportagent.exception.DocumentStorageException;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -55,6 +57,15 @@ public class LocalDocumentStorageService implements DocumentStorageService {
             deleteTemporaryFile(temporaryFile);
             throw new DocumentStorageException("Could not store the uploaded document", exception);
         }
+    }
+
+    @Override
+    public Resource load(String storageKey) {
+        Path storedFile = resolveStorageKey(storageKey);
+        if (!Files.isRegularFile(storedFile)) {
+            throw new DocumentStorageException("Stored document does not exist");
+        }
+        return new FileSystemResource(storedFile);
     }
 
     @Override

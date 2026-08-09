@@ -42,6 +42,10 @@ class LocalDocumentStorageServiceTest {
         assertEquals(content.length, storedFile.sizeBytes());
         assertEquals(sha256(content), storedFile.checksumSha256());
         assertArrayEquals(content, Files.readAllBytes(storedPath));
+        assertArrayEquals(
+                content,
+                storageService.load(storedFile.storageKey()).getContentAsByteArray()
+        );
 
         storageService.delete(storedFile.storageKey());
         assertFalse(Files.exists(storedPath));
@@ -54,6 +58,20 @@ class LocalDocumentStorageServiceTest {
         assertThrows(
                 DocumentStorageException.class,
                 () -> storageService.delete("../outside.pdf")
+        );
+        assertThrows(
+                DocumentStorageException.class,
+                () -> storageService.load("../outside.pdf")
+        );
+    }
+
+    @Test
+    void rejectsMissingStoredFile() {
+        LocalDocumentStorageService storageService = storageService();
+
+        assertThrows(
+                DocumentStorageException.class,
+                () -> storageService.load("missing.pdf")
         );
     }
 
