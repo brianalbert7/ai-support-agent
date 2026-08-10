@@ -1,6 +1,7 @@
 package org.brian.aisupportagent.service;
 
 import lombok.RequiredArgsConstructor;
+import org.brian.aisupportagent.config.ConversationHistoryProperties;
 import org.brian.aisupportagent.dto.ConversationMessageResponse;
 import org.brian.aisupportagent.dto.KnowledgeAnswerResponse;
 import org.brian.aisupportagent.dto.KnowledgeCitationResponse;
@@ -12,9 +13,12 @@ import org.brian.aisupportagent.exception.ConversationNotFoundException;
 import org.brian.aisupportagent.repository.ConversationMessageCitationRepository;
 import org.brian.aisupportagent.repository.ConversationMessageRepository;
 import org.brian.aisupportagent.repository.ConversationRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +32,7 @@ public class ConversationMessagePersistenceService {
     private final ConversationRepository conversationRepository;
     private final ConversationMessageRepository messageRepository;
     private final ConversationMessageCitationRepository citationRepository;
+    private final ConversationHistoryProperties historyProperties;
 
     @Transactional
     public ConversationMessageResponse saveUserMessage(
@@ -100,6 +105,34 @@ public class ConversationMessagePersistenceService {
                         citationsByMessage.getOrDefault(message.getId(), List.of())
                 ))
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ConversationContextMessage> findRecentContext(
+            UUID conversationId,
+            UUID ownerId,
+            UUID currentMessageId
+    ) {
+        findOwnedConversation(conversationId, ownerId);
+        List<ConversationMessage> newestMessages = messageRepository
+                .findAllByConversationIdAndIdNotOrderByCreatedAtDescIdDesc(
+                        conversationId,
+                        currentMessageId,
+                        PageRequest.of(0, historyProperties.maxMessages())
+                );
+
+        List<ConversationContextMessage> context = new ArrayList<>();
+        int characterCount = 0;
+        for (ConversationMessage message : newestMessages) {
+            String content = message.getContent().trim();
+            if (characterCount + content.length() > historyProperties.maxCharacters()) {
+                break;
+            }
+            context.add(new ConversationContextMessage(message.getRole(), content));
+            characterCount += content.length();
+        }
+        Collections.reverse(context);
+        return List.copyOf(context);
     }
 
     private Conversation findOwnedConversation(UUID conversationId, UUID ownerId) {

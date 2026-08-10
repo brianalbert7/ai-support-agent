@@ -32,8 +32,14 @@ public class ConversationMessageService {
                 authenticatedUser.getId(),
                 question
         );
+        List<ConversationContextMessage> history = persistenceService.findRecentContext(
+                conversationId,
+                authenticatedUser.getId(),
+                userMessage.id()
+        );
         KnowledgeAnswerResponse answer = knowledgeAnswerService.answer(
-                new KnowledgeSearchRequest(question, request.maxResults())
+                new KnowledgeSearchRequest(question, request.maxResults()),
+                history
         );
         ConversationMessageResponse assistantMessage =
                 persistenceService.saveAssistantMessage(

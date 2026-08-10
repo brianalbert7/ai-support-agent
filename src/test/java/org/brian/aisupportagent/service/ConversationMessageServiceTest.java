@@ -59,15 +59,30 @@ class ConversationMessageServiceTest {
                 ConversationMessageRole.ASSISTANT,
                 answer.answer()
         );
+        List<ConversationContextMessage> history = List.of(
+                new ConversationContextMessage(
+                        ConversationMessageRole.USER,
+                        "Earlier question"
+                ),
+                new ConversationContextMessage(
+                        ConversationMessageRole.ASSISTANT,
+                        "Earlier answer [1]."
+                )
+        );
         when(persistenceService.saveUserMessage(
                 conversationId,
                 ownerId,
                 "How many vacation days do I get?"
         )).thenReturn(userMessage);
-        when(knowledgeAnswerService.answer(new KnowledgeSearchRequest(
-                "How many vacation days do I get?",
-                4
-        ))).thenReturn(answer);
+        when(persistenceService.findRecentContext(
+                conversationId,
+                ownerId,
+                userMessage.id()
+        )).thenReturn(history);
+        when(knowledgeAnswerService.answer(
+                new KnowledgeSearchRequest("How many vacation days do I get?", 4),
+                history
+        )).thenReturn(answer);
         when(persistenceService.saveAssistantMessage(
                 conversationId,
                 ownerId,
@@ -87,10 +102,15 @@ class ConversationMessageServiceTest {
                 ownerId,
                 "How many vacation days do I get?"
         );
-        verify(knowledgeAnswerService).answer(new KnowledgeSearchRequest(
-                "How many vacation days do I get?",
-                4
-        ));
+        verify(persistenceService).findRecentContext(
+                conversationId,
+                ownerId,
+                userMessage.id()
+        );
+        verify(knowledgeAnswerService).answer(
+                new KnowledgeSearchRequest("How many vacation days do I get?", 4),
+                history
+        );
         verify(persistenceService).saveAssistantMessage(conversationId, ownerId, answer);
     }
 
@@ -104,12 +124,21 @@ class ConversationMessageServiceTest {
                 "Reset password",
                 null
         );
+        ConversationMessageResponse userMessage = message(
+                ConversationMessageRole.USER,
+                "Reset password"
+        );
         when(persistenceService.saveUserMessage(
                 conversationId,
                 ownerId,
                 "Reset password"
-        )).thenReturn(message(ConversationMessageRole.USER, "Reset password"));
-        when(knowledgeAnswerService.answer(searchRequest)).thenThrow(
+        )).thenReturn(userMessage);
+        when(persistenceService.findRecentContext(
+                conversationId,
+                ownerId,
+                userMessage.id()
+        )).thenReturn(List.of());
+        when(knowledgeAnswerService.answer(searchRequest, List.of())).thenThrow(
                 new KnowledgeAnswerException(new IllegalStateException("Provider unavailable"))
         );
 

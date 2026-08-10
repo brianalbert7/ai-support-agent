@@ -90,6 +90,33 @@ class KnowledgeSearchServiceTest {
     }
 
     @Test
+    void usesContextualRetrievalQueryButPreservesCurrentQuestion() {
+        KnowledgeSearchRequest request = new KnowledgeSearchRequest(
+                "What about part-time employees?",
+                3
+        );
+        String retrievalQuery = """
+                PRIOR USER QUESTIONS:
+                - How many vacation days do full-time employees receive?
+                CURRENT QUESTION:
+                What about part-time employees?
+                """.trim();
+        float[] questionEmbedding = new float[]{1.0f, 0.0f, 0.0f};
+        when(documentEmbeddingService.embedQuery(retrievalQuery))
+                .thenReturn(questionEmbedding);
+        when(chunkEmbeddingRepository.findSimilar(questionEmbedding, 0.70, 3))
+                .thenReturn(List.of());
+
+        KnowledgeSearchResponse response = knowledgeSearchService.search(
+                request,
+                retrievalQuery
+        );
+
+        assertEquals("What about part-time employees?", response.question());
+        verify(documentEmbeddingService).embedQuery(retrievalQuery);
+    }
+
+    @Test
     void translatesEmbeddingFailureWithoutQueryingDatabase() {
         when(documentEmbeddingService.embedQuery("vacation policy"))
                 .thenThrow(new EmbeddingGenerationException("Provider unavailable"));

@@ -24,14 +24,23 @@ public class KnowledgeSearchService {
 
     @PreAuthorize("isAuthenticated()")
     public KnowledgeSearchResponse search(KnowledgeSearchRequest request) {
+        return search(request, request.question());
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    public KnowledgeSearchResponse search(
+            KnowledgeSearchRequest request,
+            String retrievalQuery
+    ) {
         String normalizedQuestion = request.question().trim();
+        String normalizedRetrievalQuery = retrievalQuery.trim();
         int resultLimit = request.maxResults() == null
                 ? properties.defaultResults()
                 : request.maxResults();
 
         try {
             float[] questionEmbedding = documentEmbeddingService.embedQuery(
-                    normalizedQuestion
+                    normalizedRetrievalQuery
             );
             List<KnowledgeSearchResultResponse> results = chunkEmbeddingRepository
                     .findSimilar(
