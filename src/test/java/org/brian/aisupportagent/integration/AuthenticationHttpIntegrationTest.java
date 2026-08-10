@@ -9,6 +9,7 @@ import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
 import org.brian.aisupportagent.repository.ChunkEmbeddingRepository;
+import org.brian.aisupportagent.repository.ConversationRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.UserRepository;
@@ -52,8 +53,10 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.brian.aisupportagent.util.PdfTestData.pdfWithPages;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -116,6 +119,9 @@ class AuthenticationHttpIntegrationTest {
 
     @Autowired
     private ChunkEmbeddingRepository chunkEmbeddingRepository;
+
+    @Autowired
+    private ConversationRepository conversationRepository;
 
     @MockitoBean
     private EmbeddingModel embeddingModel;
@@ -686,6 +692,76 @@ class AuthenticationHttpIntegrationTest {
                         .value("The knowledge answer could not be generated"));
     }
 
+    @Test
+    void employeeCreatesListsAndReadsOnlyOwnedConversations() throws Exception {
+        long conversationCountBefore = conversationRepository.count();
+        AuthenticationTokens ownerTokens = register(uniqueEmail());
+        AuthenticationTokens otherUserTokens = register(uniqueEmail());
+        UUID firstConversationId = createConversation(
+                ownerTokens,
+                "  Vacation policy questions  ",
+                "Vacation policy questions"
+        );
+        UUID secondConversationId = createConversation(
+                ownerTokens,
+                "Password reset questions",
+                "Password reset questions"
+        );
+        UUID otherConversationId = createConversation(
+                otherUserTokens,
+                "Private conversation",
+                "Private conversation"
+        );
+
+        mockMvc.perform(get("/api/conversations")
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[*].title", hasItems(
+                        "Vacation policy questions",
+                        "Password reset questions"
+                )))
+                .andExpect(jsonPath("$[*].title", not(hasItem("Private conversation"))));
+
+        mockMvc.perform(get("/api/conversations/{conversationId}", firstConversationId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(firstConversationId.toString()))
+                .andExpect(jsonPath("$.title").value("Vacation policy questions"))
+                .andExpect(jsonPath("$.createdAt").isNotEmpty())
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty())
+                .andExpect(jsonPath("$.owner").doesNotExist());
+
+        mockMvc.perform(get("/api/conversations/{conversationId}", otherConversationId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_FOUND"));
+
+        mockMvc.perform(post("/api/conversations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("title", " ")))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors.title")
+                        .value("Conversation title is required"));
+
+        assertTrue(conversationRepository.findById(secondConversationId).isPresent());
+        assertEquals(conversationCountBefore + 3, conversationRepository.count());
+    }
+
     private AuthenticationTokens register(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -716,6 +792,31 @@ class AuthenticationHttpIntegrationTest {
                                 bearer(adminTokens.accessToken())
                         ))
                 .andExpect(status().isCreated())
+                .andReturn();
+
+        String responseBody = new String(
+                result.getResponse().getContentAsByteArray(),
+                StandardCharsets.UTF_8
+        );
+        return UUID.fromString(JsonPath.read(responseBody, "$.id"));
+    }
+
+    private UUID createConversation(
+            AuthenticationTokens tokens,
+            String title,
+            String expectedTitle
+    ) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/conversations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("title", title)))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(tokens.accessToken())
+                        ))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.title").value(expectedTitle))
+                .andExpect(jsonPath("$.createdAt").isNotEmpty())
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty())
                 .andReturn();
 
         String responseBody = new String(

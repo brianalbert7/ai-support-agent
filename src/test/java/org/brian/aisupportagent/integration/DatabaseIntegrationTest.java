@@ -1,6 +1,7 @@
 package org.brian.aisupportagent.integration;
 
 import org.brian.aisupportagent.entity.DocumentStatus;
+import org.brian.aisupportagent.entity.Conversation;
 import org.brian.aisupportagent.entity.KnowledgeDocument;
 import org.brian.aisupportagent.entity.KnowledgeDocumentChunk;
 import org.brian.aisupportagent.entity.KnowledgeDocumentPage;
@@ -9,6 +10,7 @@ import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
 import org.brian.aisupportagent.repository.ChunkEmbeddingRepository;
+import org.brian.aisupportagent.repository.ConversationRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.RefreshTokenRepository;
@@ -65,6 +67,9 @@ class DatabaseIntegrationTest {
     private ChunkEmbeddingRepository chunkEmbeddingRepository;
 
     @Autowired
+    private ConversationRepository conversationRepository;
+
+    @Autowired
     private JdbcClient jdbcClient;
 
     @Test
@@ -73,7 +78,7 @@ class DatabaseIntegrationTest {
         Integer migrationCount = jdbcClient.sql("""
                         SELECT COUNT(*)
                         FROM flyway_schema_history
-                        WHERE version IN ('1', '2', '3', '4', '5', '6')
+                        WHERE version IN ('1', '2', '3', '4', '5', '6', '7')
                           AND success = TRUE
                         """)
                 .query(Integer.class)
@@ -87,6 +92,12 @@ class DatabaseIntegrationTest {
                 .role(Role.EMPLOYEE)
                 .build();
         User savedUser = userRepository.saveAndFlush(user);
+
+        Conversation conversation = Conversation.builder()
+                .owner(savedUser)
+                .title("Vacation policy questions")
+                .build();
+        Conversation savedConversation = conversationRepository.saveAndFlush(conversation);
 
         RefreshToken refreshToken = RefreshToken.builder()
                 .tokenHash("a".repeat(64))
@@ -137,7 +148,7 @@ class DatabaseIntegrationTest {
                 .query(Integer.class)
                 .single();
 
-        assertEquals(6, migrationCount);
+        assertEquals(7, migrationCount);
         assertTrue(userRepository.findByEmail("employee@example.com").isPresent());
         assertTrue(refreshTokenRepository.findByTokenHash("a".repeat(64)).isPresent());
         assertEquals(DocumentStatus.UPLOADED, savedDocument.getStatus());
@@ -154,6 +165,10 @@ class DatabaseIntegrationTest {
         assertEquals(1, chunkEmbeddingRepository.countEmbeddedByDocumentId(
                 savedDocument.getId()
         ));
+        assertEquals(savedUser.getId(), savedConversation.getOwner().getId());
+        assertEquals("Vacation policy questions", savedConversation.getTitle());
+        assertNotNull(savedConversation.getCreatedAt());
+        assertNotNull(savedConversation.getUpdatedAt());
     }
 
     private float[] testEmbeddingVector() {
