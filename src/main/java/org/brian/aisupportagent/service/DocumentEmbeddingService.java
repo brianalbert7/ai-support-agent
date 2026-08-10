@@ -59,6 +59,25 @@ public class DocumentEmbeddingService {
         return List.copyOf(chunkEmbeddings);
     }
 
+    public float[] embedQuery(String query) {
+        if (query == null || query.isBlank()) {
+            throw new EmbeddingGenerationException("The search query must not be blank");
+        }
+
+        try {
+            float[] vector = embeddingModel.embed(query);
+            validateVector(vector);
+            return vector.clone();
+        } catch (EmbeddingGenerationException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new EmbeddingGenerationException(
+                    "Could not generate the search query embedding",
+                    exception
+            );
+        }
+    }
+
     private void validateBatch(
             List<KnowledgeDocumentChunk> chunks,
             List<float[]> vectors
@@ -70,18 +89,29 @@ public class DocumentEmbeddingService {
         }
 
         for (float[] vector : vectors) {
-            if (vector == null || vector.length != dimensions) {
+            validateVector(vector);
+        }
+    }
+
+    private void validateVector(float[] vector) {
+        if (vector == null || vector.length != dimensions) {
+            throw new EmbeddingGenerationException(
+                    "The embedding model returned an unexpected vector dimension"
+            );
+        }
+        double squaredMagnitude = 0.0;
+        for (float value : vector) {
+            if (!Float.isFinite(value)) {
                 throw new EmbeddingGenerationException(
-                        "The embedding model returned an unexpected vector dimension"
+                        "The embedding model returned a non-finite vector value"
                 );
             }
-            for (float value : vector) {
-                if (!Float.isFinite(value)) {
-                    throw new EmbeddingGenerationException(
-                            "The embedding model returned a non-finite vector value"
-                    );
-                }
-            }
+            squaredMagnitude += (double) value * value;
+        }
+        if (squaredMagnitude == 0.0) {
+            throw new EmbeddingGenerationException(
+                    "The embedding model returned a zero-magnitude vector"
+            );
         }
     }
 }

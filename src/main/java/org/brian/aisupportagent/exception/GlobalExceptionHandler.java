@@ -234,4 +234,21 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
     }
+
+    @ExceptionHandler(KnowledgeSearchException.class)
+    public ResponseEntity<ApiErrorResponse> handleKnowledgeSearch(
+            KnowledgeSearchException exception,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.SERVICE_UNAVAILABLE.value(),
+                "KNOWLEDGE_SEARCH_UNAVAILABLE",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+    }
 }

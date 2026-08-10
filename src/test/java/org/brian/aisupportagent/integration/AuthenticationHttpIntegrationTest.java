@@ -47,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.closeTo;
 import static org.brian.aisupportagent.util.PdfTestData.pdfWithPages;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -54,6 +55,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @Testcontainers(disabledWithoutDocker = true)
@@ -445,6 +447,113 @@ class AuthenticationHttpIntegrationTest {
                 .andExpect(jsonPath("$.message").value("The uploaded file is not a valid PDF"));
     }
 
+    @Test
+    void authenticatedEmployeeSearchesReadyDocumentsBySemanticSimilarity()
+            throws Exception {
+        String bestText = "Vacation allowance policy " + UUID.randomUUID();
+        String secondText = "Paid time off guidance " + UUID.randomUUID();
+        String question = "How much vacation time do employees receive?";
+        when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
+            List<String> inputs = invocation.getArgument(0);
+            return inputs.stream()
+                    .map(input -> input.contains(bestText)
+                            ? testEmbeddingVector(2, 1.0f, 3, 0.0f)
+                            : testEmbeddingVector(2, 0.8f, 3, 0.6f))
+                    .toList();
+        });
+        when(embeddingModel.embed(eq(question)))
+                .thenReturn(testEmbeddingVector(2, 1.0f, 3, 0.0f));
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        UUID bestDocumentId = uploadDocument(
+                adminTokens,
+                "Vacation Handbook",
+                pdfWithPages(bestText)
+        );
+        UUID secondDocumentId = uploadDocument(
+                adminTokens,
+                "Benefits Guide",
+                pdfWithPages(secondText)
+        );
+        processDocument(adminTokens, bestDocumentId);
+        processDocument(adminTokens, secondDocumentId);
+
+        mockMvc.perform(post("/api/knowledge/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "question", question,
+                                "maxResults", 2
+                        )))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.question").value(question))
+                .andExpect(jsonPath("$.results.length()").value(2))
+                .andExpect(jsonPath("$.results[0].documentId")
+                        .value(bestDocumentId.toString()))
+                .andExpect(jsonPath("$.results[0].documentName")
+                        .value("Vacation Handbook"))
+                .andExpect(jsonPath("$.results[0].pageNumber").value(1))
+                .andExpect(jsonPath("$.results[0].content").value(bestText))
+                .andExpect(jsonPath("$.results[0].similarity")
+                        .value(closeTo(1.0, 0.0001)))
+                .andExpect(jsonPath("$.results[1].documentId")
+                        .value(secondDocumentId.toString()))
+                .andExpect(jsonPath("$.results[1].similarity")
+                        .value(closeTo(0.8, 0.0001)));
+    }
+
+    @Test
+    void knowledgeSearchRequiresAuthenticationAndValidatesRequest() throws Exception {
+        mockMvc.perform(post("/api/knowledge/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("question", "vacation policy"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+        mockMvc.perform(post("/api/knowledge/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "question", " ",
+                                "maxResults", 21
+                        )))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors.question")
+                        .value("Question is required"))
+                .andExpect(jsonPath("$.fieldErrors.maxResults")
+                        .value("Maximum results must be 20 or fewer"));
+    }
+
+    @Test
+    void knowledgeSearchReturnsServiceUnavailableWhenEmbeddingFails() throws Exception {
+        String question = "Where is the support policy?";
+        when(embeddingModel.embed(eq(question))).thenThrow(
+                new IllegalStateException("Simulated provider failure")
+        );
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+
+        mockMvc.perform(post("/api/knowledge/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("question", question)))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code")
+                        .value("KNOWLEDGE_SEARCH_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message")
+                        .value("Knowledge search is temporarily unavailable"));
+    }
+
     private AuthenticationTokens register(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -484,6 +593,19 @@ class AuthenticationHttpIntegrationTest {
         return UUID.fromString(JsonPath.read(responseBody, "$.id"));
     }
 
+    private void processDocument(
+            AuthenticationTokens adminTokens,
+            UUID documentId
+    ) throws Exception {
+        mockMvc.perform(post("/api/admin/documents/{documentId}/process", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("READY"));
+    }
+
     private long storedPdfCount() throws Exception {
         if (Files.notExists(DOCUMENT_STORAGE_DIRECTORY)) {
             return 0;
@@ -496,6 +618,18 @@ class AuthenticationHttpIntegrationTest {
     private float[] testEmbeddingVector() {
         float[] vector = new float[1536];
         vector[0] = 1.0f;
+        return vector;
+    }
+
+    private float[] testEmbeddingVector(
+            int firstIndex,
+            float firstValue,
+            int secondIndex,
+            float secondValue
+    ) {
+        float[] vector = new float[1536];
+        vector[firstIndex] = firstValue;
+        vector[secondIndex] = secondValue;
         return vector;
     }
 
@@ -552,7 +686,7 @@ class AuthenticationHttpIntegrationTest {
         return json(Map.of("refreshToken", refreshToken));
     }
 
-    private String json(Map<String, String> body) {
+    private String json(Object body) {
         return objectMapper.writeValueAsString(body);
     }
 

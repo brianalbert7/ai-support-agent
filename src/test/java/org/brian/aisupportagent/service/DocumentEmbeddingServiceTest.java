@@ -67,7 +67,7 @@ class DocumentEmbeddingServiceTest {
     }
 
     @Test
-    void rejectsUnexpectedEmbeddingDimensionAndNonFiniteValues() {
+    void rejectsMalformedEmbeddingVectors() {
         embeddingModel.addResponse(List.of(new float[]{1.0f, 2.0f}));
         assertThrows(
                 EmbeddingGenerationException.class,
@@ -79,6 +79,12 @@ class DocumentEmbeddingServiceTest {
                 EmbeddingGenerationException.class,
                 () -> embeddingService.embed(List.of(chunk("not finite")))
         );
+
+        embeddingModel.addResponse(List.of(new float[]{0.0f, 0.0f, 0.0f}));
+        assertThrows(
+                EmbeddingGenerationException.class,
+                () -> embeddingService.embed(List.of(chunk("zero magnitude")))
+        );
     }
 
     @Test
@@ -89,6 +95,23 @@ class DocumentEmbeddingServiceTest {
         );
 
         assertEquals(List.of(), embeddingModel.requestSizes());
+    }
+
+    @Test
+    void embedsAndValidatesSearchQuery() {
+        float[] providerVector = vector(4);
+        embeddingModel.addResponse(List.of(providerVector));
+
+        float[] result = embeddingService.embedQuery("vacation policy");
+        result[0] = 99.0f;
+
+        assertEquals(4.0f, providerVector[0]);
+        assertEquals(List.of(1), embeddingModel.requestSizes());
+
+        assertThrows(
+                EmbeddingGenerationException.class,
+                () -> embeddingService.embedQuery(" ")
+        );
     }
 
     private KnowledgeDocumentChunk chunk(String content) {

@@ -2,9 +2,12 @@ package org.brian.aisupportagent.repository;
 
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.service.ChunkEmbedding;
+import org.brian.aisupportagent.service.RetrievedDocumentChunk;
 import org.jspecify.annotations.NonNull;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
@@ -22,7 +25,29 @@ public class ChunkEmbeddingRepository {
             WHERE id = ?
             """;
 
+    private static final String FIND_SIMILAR_SQL = """
+            SELECT chunk.id AS chunk_id,
+                   document.id AS document_id,
+                   document.display_name AS document_name,
+                   page.page_number,
+                   chunk.chunk_index,
+                   chunk.content,
+                   1 - (chunk.embedding <=> CAST(:embedding AS vector)) AS similarity
+            FROM knowledge_document_chunks chunk
+            JOIN knowledge_document_pages page
+              ON page.id = chunk.knowledge_document_page_id
+            JOIN knowledge_documents document
+              ON document.id = page.knowledge_document_id
+            WHERE document.status = 'READY'
+              AND chunk.embedding IS NOT NULL
+              AND 1 - (chunk.embedding <=> CAST(:embedding AS vector))
+                  >= :minimumSimilarity
+            ORDER BY chunk.embedding <=> CAST(:embedding AS vector)
+            LIMIT :resultLimit
+            """;
+
     private final JdbcTemplate jdbcTemplate;
+    private final NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 
     public void saveAll(List<ChunkEmbedding> embeddings) {
         int[] updateCounts = jdbcTemplate.batchUpdate(
@@ -66,6 +91,31 @@ public class ChunkEmbeddingRepository {
                 documentId
         );
         return count == null ? 0 : count;
+    }
+
+    public List<RetrievedDocumentChunk> findSimilar(
+            float[] queryEmbedding,
+            double minimumSimilarity,
+            int resultLimit
+    ) {
+        MapSqlParameterSource parameters = new MapSqlParameterSource()
+                .addValue("embedding", toVectorLiteral(queryEmbedding))
+                .addValue("minimumSimilarity", minimumSimilarity)
+                .addValue("resultLimit", resultLimit);
+
+        return namedParameterJdbcTemplate.query(
+                FIND_SIMILAR_SQL,
+                parameters,
+                (resultSet, rowNumber) -> new RetrievedDocumentChunk(
+                        resultSet.getObject("chunk_id", UUID.class),
+                        resultSet.getObject("document_id", UUID.class),
+                        resultSet.getString("document_name"),
+                        resultSet.getInt("page_number"),
+                        resultSet.getInt("chunk_index"),
+                        resultSet.getString("content"),
+                        resultSet.getDouble("similarity")
+                )
+        );
     }
 
     private String toVectorLiteral(float[] vector) {
