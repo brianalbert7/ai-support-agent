@@ -319,6 +319,124 @@ class AuthenticationHttpIntegrationTest {
     }
 
     @Test
+    void adminListsReadsAndDeletesDocumentWithSearchDataAndStoredPdf()
+            throws Exception {
+        long documentCountBefore = documentRepository.count();
+        long pageCountBefore = documentPageRepository.count();
+        long chunkCountBefore = documentChunkRepository.count();
+        long storedPdfCountBefore = storedPdfCount();
+        when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
+            List<String> inputs = invocation.getArgument(0);
+            return inputs.stream()
+                    .map(input -> testEmbeddingVector())
+                    .toList();
+        });
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        UUID documentId = uploadDocument(
+                adminTokens,
+                "Deletable Support Manual",
+                pdfWithPages(
+                        "Customers can reset passwords from account settings. "
+                                + UUID.randomUUID()
+                )
+        );
+        processDocument(adminTokens, documentId);
+        KnowledgeDocument storedDocument = documentRepository.findById(documentId)
+                .orElseThrow();
+        Path storedPdf = DOCUMENT_STORAGE_DIRECTORY.resolve(storedDocument.getStorageKey());
+
+        mockMvc.perform(get("/api/admin/documents")
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        mockMvc.perform(get("/api/admin/documents")
+                        .queryParam("page", "0")
+                        .queryParam("size", "1")
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(documentId.toString()))
+                .andExpect(jsonPath("$.content[0].status").value("READY"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalElements")
+                        .value(documentCountBefore + 1));
+
+        mockMvc.perform(get("/api/admin/documents")
+                        .queryParam("page", "-1")
+                        .queryParam("size", "101")
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors.page")
+                        .value("Page must be 0 or greater"))
+                .andExpect(jsonPath("$.fieldErrors.size")
+                        .value("Page size must be 100 or fewer"));
+
+        mockMvc.perform(get("/api/admin/documents/{documentId}", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(documentId.toString()))
+                .andExpect(jsonPath("$.displayName")
+                        .value("Deletable Support Manual"))
+                .andExpect(jsonPath("$.status").value("READY"))
+                .andExpect(jsonPath("$.pageCount").value(1))
+                .andExpect(jsonPath("$.uploadedByUserId").isNotEmpty())
+                .andExpect(jsonPath("$.storageKey").doesNotExist())
+                .andExpect(jsonPath("$.checksumSha256").doesNotExist());
+
+        mockMvc.perform(delete("/api/admin/documents/{documentId}", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+
+        assertTrue(documentRepository.findById(documentId).isPresent());
+        assertTrue(Files.exists(storedPdf));
+        assertTrue(documentPageRepository.count() > pageCountBefore);
+        assertTrue(documentChunkRepository.count() > chunkCountBefore);
+        assertTrue(chunkEmbeddingRepository.countEmbeddedByDocumentId(documentId) > 0);
+
+        mockMvc.perform(delete("/api/admin/documents/{documentId}", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/admin/documents/{documentId}", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("DOCUMENT_NOT_FOUND"));
+
+        assertEquals(documentCountBefore, documentRepository.count());
+        assertEquals(pageCountBefore, documentPageRepository.count());
+        assertEquals(chunkCountBefore, documentChunkRepository.count());
+        assertEquals(0, chunkEmbeddingRepository.countEmbeddedByDocumentId(documentId));
+        assertEquals(storedPdfCountBefore, storedPdfCount());
+        assertTrue(Files.notExists(storedPdf));
+    }
+
+    @Test
     void adminProcessesPdfIntoPageRecordsAndCannotProcessReadyDocumentAgain()
             throws Exception {
         when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
@@ -409,6 +527,15 @@ class AuthenticationHttpIntegrationTest {
                 .findAllByKnowledgeDocumentIdOrderByPageNumberAsc(documentId)
                 .size());
         assertEquals(0, documentChunkRepository.findAllByDocumentIdOrdered(documentId).size());
+
+        mockMvc.perform(get("/api/admin/documents/{documentId}", documentId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(adminTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureReason").isNotEmpty());
     }
 
     @Test

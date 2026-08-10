@@ -2,12 +2,14 @@ package org.brian.aisupportagent.service;
 
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.dto.KnowledgeDocumentResponse;
+import org.brian.aisupportagent.dto.PagedResponse;
 import org.brian.aisupportagent.entity.DocumentStatus;
 import org.brian.aisupportagent.entity.KnowledgeDocumentChunk;
 import org.brian.aisupportagent.entity.KnowledgeDocument;
 import org.brian.aisupportagent.entity.KnowledgeDocumentPage;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.exception.DocumentChunkingException;
+import org.brian.aisupportagent.exception.DocumentDeletionException;
 import org.brian.aisupportagent.exception.DocumentProcessingException;
 import org.brian.aisupportagent.exception.DocumentStorageException;
 import org.brian.aisupportagent.exception.DuplicateDocumentException;
@@ -21,6 +23,8 @@ import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.util.DocumentFileValidator;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -130,6 +134,48 @@ public class KnowledgeDocumentService {
         return toResponse(documentRepository.saveAndFlush(document));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional(readOnly = true)
+    public PagedResponse<KnowledgeDocumentResponse> findAll(int page, int size) {
+        Page<KnowledgeDocument> documentPage = documentRepository
+                .findAllByOrderByCreatedAtDescIdDesc(PageRequest.of(page, size));
+        return new PagedResponse<>(
+                documentPage.getContent().stream().map(this::toResponse).toList(),
+                documentPage.getNumber(),
+                documentPage.getSize(),
+                documentPage.getTotalElements(),
+                documentPage.getTotalPages(),
+                documentPage.isFirst(),
+                documentPage.isLast()
+        );
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional(readOnly = true)
+    public KnowledgeDocumentResponse findById(UUID documentId) {
+        return toResponse(findDocument(documentId));
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public void delete(UUID documentId) {
+        KnowledgeDocument document = findDocument(documentId);
+        String storageKey = document.getStorageKey();
+        documentRepository.delete(document);
+        documentRepository.flush();
+
+        try {
+            storageService.delete(storageKey);
+        } catch (DocumentStorageException exception) {
+            throw new DocumentDeletionException(exception);
+        }
+    }
+
+    private KnowledgeDocument findDocument(UUID documentId) {
+        return documentRepository.findById(documentId)
+                .orElseThrow(() -> new KnowledgeDocumentNotFoundException(documentId));
+    }
+
     private void validateProcessableStatus(DocumentStatus status) {
         if (status != DocumentStatus.UPLOADED && status != DocumentStatus.FAILED) {
             throw new InvalidDocumentStateException(status);
@@ -211,6 +257,7 @@ public class KnowledgeDocumentService {
                 .sizeBytes(document.getSizeBytes())
                 .status(document.getStatus())
                 .pageCount(document.getPageCount())
+                .failureReason(document.getFailureReason())
                 .uploadedByUserId(document.getUploadedBy().getId())
                 .createdAt(document.getCreatedAt())
                 .updatedAt(document.getUpdatedAt())

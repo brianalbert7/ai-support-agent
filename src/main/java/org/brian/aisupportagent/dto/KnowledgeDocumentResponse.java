@@ -15,6 +15,7 @@ public record KnowledgeDocumentResponse(
         long sizeBytes,
         DocumentStatus status,
         Integer pageCount,
+        String failureReason,
         UUID uploadedByUserId,
         Instant createdAt,
         Instant updatedAt

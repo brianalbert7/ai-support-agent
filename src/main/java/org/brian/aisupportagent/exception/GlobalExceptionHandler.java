@@ -208,6 +208,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
+    @ExceptionHandler(DocumentDeletionException.class)
+    public ResponseEntity<ApiErrorResponse> handleDocumentDeletion(
+            DocumentDeletionException exception,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                "DOCUMENT_DELETION_FAILED",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+    }
+
     @ExceptionHandler(KnowledgeDocumentNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleKnowledgeDocumentNotFound(
             KnowledgeDocumentNotFoundException exception,
