@@ -251,4 +251,21 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
     }
+
+    @ExceptionHandler(KnowledgeAnswerException.class)
+    public ResponseEntity<ApiErrorResponse> handleKnowledgeAnswer(
+            KnowledgeAnswerException exception,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.SERVICE_UNAVAILABLE.value(),
+                "KNOWLEDGE_ANSWER_UNAVAILABLE",
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+    }
 }

@@ -15,6 +15,11 @@ import org.brian.aisupportagent.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -48,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.closeTo;
+import static org.hamcrest.Matchers.containsString;
 import static org.brian.aisupportagent.util.PdfTestData.pdfWithPages;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -55,7 +61,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Testcontainers(disabledWithoutDocker = true)
@@ -110,6 +119,9 @@ class AuthenticationHttpIntegrationTest {
 
     @MockitoBean
     private EmbeddingModel embeddingModel;
+
+    @MockitoBean
+    private ChatModel chatModel;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -554,6 +566,126 @@ class AuthenticationHttpIntegrationTest {
                         .value("Knowledge search is temporarily unavailable"));
     }
 
+    @Test
+    void authenticatedEmployeeReceivesGroundedAnswerWithDatabaseCitation()
+            throws Exception {
+        String sourceText = "Full-time employees receive twenty vacation days each year "
+                + UUID.randomUUID();
+        String question = "How many vacation days do full-time employees receive?";
+        when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
+            List<String> inputs = invocation.getArgument(0);
+            return inputs.stream()
+                    .map(input -> testEmbeddingVector(4, 1.0f, 5, 0.0f))
+                    .toList();
+        });
+        when(embeddingModel.embed(eq(question)))
+                .thenReturn(testEmbeddingVector(4, 1.0f, 5, 0.0f));
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse(
+                "Full-time employees receive twenty vacation days each year [1]."
+        ));
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        UUID documentId = uploadDocument(
+                adminTokens,
+                "Employee Handbook",
+                pdfWithPages(sourceText)
+        );
+        processDocument(adminTokens, documentId);
+
+        mockMvc.perform(post("/api/knowledge/ask")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "question", question,
+                                "maxResults", 3
+                        )))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.question").value(question))
+                .andExpect(jsonPath("$.answer").value(
+                        "Full-time employees receive twenty vacation days each year [1]."
+                ))
+                .andExpect(jsonPath("$.grounded").value(true))
+                .andExpect(jsonPath("$.citations.length()").value(1))
+                .andExpect(jsonPath("$.citations[0].sourceNumber").value(1))
+                .andExpect(jsonPath("$.citations[0].documentId")
+                        .value(documentId.toString()))
+                .andExpect(jsonPath("$.citations[0].documentName")
+                        .value("Employee Handbook"))
+                .andExpect(jsonPath("$.citations[0].pageNumber").value(1))
+                .andExpect(jsonPath("$.citations[0].excerpt").value(containsString(
+                        "Full-time employees receive twenty vacation days each year"
+                )))
+                .andExpect(jsonPath("$.citations[0].similarity")
+                        .value(closeTo(1.0, 0.0001)));
+    }
+
+    @Test
+    void knowledgeAnswerSkipsChatModelWhenRetrievalFindsNoSources() throws Exception {
+        String question = "What is the interplanetary travel reimbursement policy?";
+        when(embeddingModel.embed(eq(question)))
+                .thenReturn(testEmbeddingVector(100, 1.0f, 101, 0.0f));
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+
+        mockMvc.perform(post("/api/knowledge/ask")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("question", question)))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounded").value(false))
+                .andExpect(jsonPath("$.answer").value(
+                        "I couldn't find enough information in the knowledge base "
+                                + "to answer that question."
+                ))
+                .andExpect(jsonPath("$.citations").isEmpty());
+
+        verify(chatModel, never()).call(any(Prompt.class));
+    }
+
+    @Test
+    void knowledgeAnswerReturnsServiceUnavailableWhenChatGenerationFails()
+            throws Exception {
+        String sourceText = "Password reset instructions " + UUID.randomUUID();
+        String question = "How do I reset a customer password?";
+        when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
+            List<String> inputs = invocation.getArgument(0);
+            return inputs.stream()
+                    .map(input -> testEmbeddingVector(6, 1.0f, 7, 0.0f))
+                    .toList();
+        });
+        when(embeddingModel.embed(eq(question)))
+                .thenReturn(testEmbeddingVector(6, 1.0f, 7, 0.0f));
+        when(chatModel.call(any(Prompt.class))).thenThrow(
+                new IllegalStateException("Simulated chat provider failure")
+        );
+        AuthenticationTokens employeeTokens = register(uniqueEmail());
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        UUID documentId = uploadDocument(
+                adminTokens,
+                "Support Manual",
+                pdfWithPages(sourceText)
+        );
+        processDocument(adminTokens, documentId);
+
+        mockMvc.perform(post("/api/knowledge/ask")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("question", question)))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(employeeTokens.accessToken())
+                        ))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code")
+                        .value("KNOWLEDGE_ANSWER_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message")
+                        .value("The knowledge answer could not be generated"));
+    }
+
     private AuthenticationTokens register(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -631,6 +763,12 @@ class AuthenticationHttpIntegrationTest {
         vector[firstIndex] = firstValue;
         vector[secondIndex] = secondValue;
         return vector;
+    }
+
+    private ChatResponse chatResponse(String answer) {
+        return new ChatResponse(List.of(
+                new Generation(new AssistantMessage(answer))
+        ));
     }
 
     private AuthenticationTokens login(String email, String password) throws Exception {
