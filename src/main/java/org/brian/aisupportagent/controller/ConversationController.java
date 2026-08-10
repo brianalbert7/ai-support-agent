@@ -4,12 +4,15 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.dto.ConversationResponse;
 import org.brian.aisupportagent.dto.CreateConversationRequest;
+import org.brian.aisupportagent.dto.UpdateConversationRequest;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.service.ConversationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -54,5 +57,27 @@ public class ConversationController {
                 conversationId,
                 authenticatedUser
         ));
+    }
+
+    @PatchMapping("/{conversationId}")
+    public ResponseEntity<ConversationResponse> update(
+            @PathVariable UUID conversationId,
+            @Valid @RequestBody UpdateConversationRequest request,
+            @AuthenticationPrincipal User authenticatedUser
+    ) {
+        return ResponseEntity.ok(conversationService.update(
+                conversationId,
+                request,
+                authenticatedUser
+        ));
+    }
+
+    @DeleteMapping("/{conversationId}")
+    public ResponseEntity<Void> delete(
+            @PathVariable UUID conversationId,
+            @AuthenticationPrincipal User authenticatedUser
+    ) {
+        conversationService.delete(conversationId, authenticatedUser);
+        return ResponseEntity.noContent().build();
     }
 }

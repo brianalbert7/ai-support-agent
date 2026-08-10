@@ -3,6 +3,7 @@ package org.brian.aisupportagent.service;
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.dto.ConversationResponse;
 import org.brian.aisupportagent.dto.CreateConversationRequest;
+import org.brian.aisupportagent.dto.UpdateConversationRequest;
 import org.brian.aisupportagent.entity.Conversation;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.exception.ConversationNotFoundException;
@@ -49,9 +50,39 @@ public class ConversationService {
             UUID conversationId,
             User authenticatedUser
     ) {
+        return toResponse(findOwnedEntity(conversationId, authenticatedUser.getId()));
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    @Transactional
+    public ConversationResponse update(
+            UUID conversationId,
+            UpdateConversationRequest request,
+            User authenticatedUser
+    ) {
+        Conversation conversation = findOwnedEntity(
+                conversationId,
+                authenticatedUser.getId()
+        );
+        conversation.setTitle(request.title().trim());
+        conversationRepository.flush();
+        return toResponse(conversation);
+    }
+
+    @PreAuthorize("isAuthenticated()")
+    @Transactional
+    public void delete(UUID conversationId, User authenticatedUser) {
+        Conversation conversation = findOwnedEntity(
+                conversationId,
+                authenticatedUser.getId()
+        );
+        conversationRepository.delete(conversation);
+        conversationRepository.flush();
+    }
+
+    private Conversation findOwnedEntity(UUID conversationId, UUID ownerId) {
         return conversationRepository
-                .findByIdAndOwnerId(conversationId, authenticatedUser.getId())
-                .map(this::toResponse)
+                .findByIdAndOwnerId(conversationId, ownerId)
                 .orElseThrow(() -> new ConversationNotFoundException(conversationId));
     }
 

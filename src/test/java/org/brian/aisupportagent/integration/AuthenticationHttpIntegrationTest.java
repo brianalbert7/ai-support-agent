@@ -1,6 +1,10 @@
 package org.brian.aisupportagent.integration;
 
 import com.jayway.jsonpath.JsonPath;
+import org.brian.aisupportagent.entity.Conversation;
+import org.brian.aisupportagent.entity.ConversationMessage;
+import org.brian.aisupportagent.entity.ConversationMessageCitation;
+import org.brian.aisupportagent.entity.ConversationMessageRole;
 import org.brian.aisupportagent.entity.DocumentStatus;
 import org.brian.aisupportagent.entity.KnowledgeDocument;
 import org.brian.aisupportagent.entity.KnowledgeDocumentChunk;
@@ -61,8 +65,10 @@ import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.brian.aisupportagent.util.PdfTestData.pdfWithPages;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -770,6 +776,119 @@ class AuthenticationHttpIntegrationTest {
 
         assertTrue(conversationRepository.findById(secondConversationId).isPresent());
         assertEquals(conversationCountBefore + 3, conversationRepository.count());
+    }
+
+    @Test
+    void employeeRenamesAndDeletesOnlyOwnedConversationWithItsHistory()
+            throws Exception {
+        long conversationCountBefore = conversationRepository.count();
+        long messageCountBefore = conversationMessageRepository.count();
+        long citationCountBefore = conversationMessageCitationRepository.count();
+        AuthenticationTokens ownerTokens = register(uniqueEmail());
+        AuthenticationTokens otherUserTokens = register(uniqueEmail());
+        UUID conversationId = createConversation(
+                ownerTokens,
+                "Original title",
+                "Original title"
+        );
+        UUID otherConversationId = createConversation(
+                otherUserTokens,
+                "Other user's conversation",
+                "Other user's conversation"
+        );
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow();
+        ConversationMessage assistantMessage = conversationMessageRepository.saveAndFlush(
+                ConversationMessage.builder()
+                        .conversation(conversation)
+                        .role(ConversationMessageRole.ASSISTANT)
+                        .content("Employees receive twenty vacation days [1].")
+                        .grounded(true)
+                        .build()
+        );
+        conversationMessageCitationRepository.saveAndFlush(
+                ConversationMessageCitation.builder()
+                        .message(assistantMessage)
+                        .sourceNumber(1)
+                        .chunkId(UUID.randomUUID())
+                        .documentId(UUID.randomUUID())
+                        .documentName("Employee Handbook")
+                        .pageNumber(4)
+                        .excerpt("Employees receive twenty vacation days each year.")
+                        .similarity(0.94)
+                        .build()
+        );
+
+        mockMvc.perform(patch("/api/conversations/{conversationId}", conversationId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("title", "  Vacation benefits  ")))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(conversationId.toString()))
+                .andExpect(jsonPath("$.title").value("Vacation benefits"))
+                .andExpect(jsonPath("$.createdAt").isNotEmpty())
+                .andExpect(jsonPath("$.updatedAt").isNotEmpty());
+
+        mockMvc.perform(patch("/api/conversations/{conversationId}", conversationId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("title", "Unauthorized rename")))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(otherUserTokens.accessToken())
+                        ))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_FOUND"));
+
+        mockMvc.perform(patch("/api/conversations/{conversationId}", conversationId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("title", " ")))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors.title")
+                        .value("Conversation title is required"));
+
+        mockMvc.perform(delete("/api/conversations/{conversationId}", conversationId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(otherUserTokens.accessToken())
+                        ))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_FOUND"));
+
+        mockMvc.perform(get("/api/conversations/{conversationId}", conversationId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Vacation benefits"));
+
+        mockMvc.perform(delete("/api/conversations/{conversationId}", conversationId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/conversations/{conversationId}", conversationId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_FOUND"));
+
+        assertEquals(conversationCountBefore + 1, conversationRepository.count());
+        assertEquals(messageCountBefore, conversationMessageRepository.count());
+        assertEquals(citationCountBefore, conversationMessageCitationRepository.count());
+        assertTrue(conversationRepository.findById(otherConversationId).isPresent());
     }
 
     @Test
