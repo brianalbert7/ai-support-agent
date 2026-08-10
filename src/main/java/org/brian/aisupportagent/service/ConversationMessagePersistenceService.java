@@ -5,6 +5,7 @@ import org.brian.aisupportagent.config.ConversationHistoryProperties;
 import org.brian.aisupportagent.dto.ConversationMessageResponse;
 import org.brian.aisupportagent.dto.KnowledgeAnswerResponse;
 import org.brian.aisupportagent.dto.KnowledgeCitationResponse;
+import org.brian.aisupportagent.dto.PagedResponse;
 import org.brian.aisupportagent.entity.Conversation;
 import org.brian.aisupportagent.entity.ConversationMessage;
 import org.brian.aisupportagent.entity.ConversationMessageCitation;
@@ -13,6 +14,7 @@ import org.brian.aisupportagent.exception.ConversationNotFoundException;
 import org.brian.aisupportagent.repository.ConversationMessageCitationRepository;
 import org.brian.aisupportagent.repository.ConversationMessageRepository;
 import org.brian.aisupportagent.repository.ConversationRepository;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,35 +78,51 @@ public class ConversationMessagePersistenceService {
     }
 
     @Transactional(readOnly = true)
-    public List<ConversationMessageResponse> findHistory(
+    public PagedResponse<ConversationMessageResponse> findHistory(
             UUID conversationId,
-            UUID ownerId
+            UUID ownerId,
+            int page,
+            int size
     ) {
         findOwnedConversation(conversationId, ownerId);
-        List<ConversationMessage> messages = messageRepository
-                .findAllByConversationIdOrderByCreatedAtAscIdAsc(conversationId);
+        Page<ConversationMessage> messagePage = messageRepository
+                .findAllByConversationIdOrderByCreatedAtAscIdAsc(
+                        conversationId,
+                        PageRequest.of(page, size)
+                );
+        List<ConversationMessage> messages = messagePage.getContent();
+        Map<UUID, List<ConversationMessageCitation>> citationsByMessage;
         if (messages.isEmpty()) {
-            return List.of();
+            citationsByMessage = Map.of();
+        } else {
+            List<UUID> messageIds = messages.stream()
+                    .map(ConversationMessage::getId)
+                    .toList();
+            citationsByMessage = citationRepository
+                    .findAllByMessageIdInOrderByMessageIdAscSourceNumberAsc(messageIds)
+                    .stream()
+                    .collect(Collectors.groupingBy(
+                            citation -> citation.getMessage().getId(),
+                            LinkedHashMap::new,
+                            Collectors.toList()
+                    ));
         }
 
-        List<UUID> messageIds = messages.stream()
-                .map(ConversationMessage::getId)
-                .toList();
-        Map<UUID, List<ConversationMessageCitation>> citationsByMessage = citationRepository
-                .findAllByMessageIdInOrderByMessageIdAscSourceNumberAsc(messageIds)
-                .stream()
-                .collect(Collectors.groupingBy(
-                        citation -> citation.getMessage().getId(),
-                        LinkedHashMap::new,
-                        Collectors.toList()
-                ));
-
-        return messages.stream()
+        List<ConversationMessageResponse> content = messages.stream()
                 .map(message -> toResponse(
                         message,
                         citationsByMessage.getOrDefault(message.getId(), List.of())
                 ))
                 .toList();
+        return new PagedResponse<>(
+                content,
+                messagePage.getNumber(),
+                messagePage.getSize(),
+                messagePage.getTotalElements(),
+                messagePage.getTotalPages(),
+                messagePage.isFirst(),
+                messagePage.isLast()
+        );
     }
 
     @Transactional(readOnly = true)

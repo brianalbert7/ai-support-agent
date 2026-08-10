@@ -5,6 +5,7 @@ import org.brian.aisupportagent.dto.ConversationExchangeResponse;
 import org.brian.aisupportagent.dto.ConversationMessageResponse;
 import org.brian.aisupportagent.dto.KnowledgeAnswerResponse;
 import org.brian.aisupportagent.dto.KnowledgeSearchRequest;
+import org.brian.aisupportagent.dto.PagedResponse;
 import org.brian.aisupportagent.entity.ConversationMessageRole;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.exception.KnowledgeAnswerException;
@@ -159,15 +160,24 @@ class ConversationMessageServiceTest {
         UUID conversationId = UUID.randomUUID();
         UUID ownerId = UUID.randomUUID();
         User user = User.builder().id(ownerId).build();
-        List<ConversationMessageResponse> history = List.of(
-                message(ConversationMessageRole.USER, "Question"),
-                message(ConversationMessageRole.ASSISTANT, "Answer")
+        PagedResponse<ConversationMessageResponse> history = new PagedResponse<>(
+                List.of(
+                        message(ConversationMessageRole.USER, "Question"),
+                        message(ConversationMessageRole.ASSISTANT, "Answer")
+                ),
+                0,
+                20,
+                2,
+                1,
+                true,
+                true
         );
-        when(persistenceService.findHistory(conversationId, ownerId)).thenReturn(history);
+        when(persistenceService.findHistory(conversationId, ownerId, 0, 20))
+                .thenReturn(history);
 
         assertEquals(
                 history,
-                conversationMessageService.findHistory(conversationId, user)
+                conversationMessageService.findHistory(conversationId, user, 0, 20)
         );
     }
 

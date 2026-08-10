@@ -9,6 +9,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.time.Instant;
@@ -60,6 +61,29 @@ public class GlobalExceptionHandler {
                 "Request validation failed",
                 request.getRequestURI(),
                 fieldErrors
+        );
+
+        return ResponseEntity.badRequest().body(response);
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException exception,
+            HttpServletRequest request
+    ) {
+        String requiredType = exception.getRequiredType() == null
+                ? "value"
+                : exception.getRequiredType().getSimpleName().toLowerCase();
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.BAD_REQUEST.value(),
+                "VALIDATION_FAILED",
+                "Request validation failed",
+                request.getRequestURI(),
+                Map.of(
+                        exception.getName(),
+                        "Value must be a valid " + requiredType
+                )
         );
 
         return ResponseEntity.badRequest().body(response);

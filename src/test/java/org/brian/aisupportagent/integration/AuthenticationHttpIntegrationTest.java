@@ -877,25 +877,47 @@ class AuthenticationHttpIntegrationTest {
         ));
 
         mockMvc.perform(get("/api/conversations/{conversationId}/messages", conversationId)
+                        .queryParam("page", "0")
+                        .queryParam("size", "3")
                         .header(
                                 HttpHeaders.AUTHORIZATION,
                                 bearer(ownerTokens.accessToken())
                         ))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(4))
-                .andExpect(jsonPath("$[0].role").value("USER"))
-                .andExpect(jsonPath("$[0].content").value(question))
-                .andExpect(jsonPath("$[1].role").value("ASSISTANT"))
-                .andExpect(jsonPath("$[1].content").value(answer))
-                .andExpect(jsonPath("$[1].citations[0].documentId")
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(3))
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.first").value(true))
+                .andExpect(jsonPath("$.last").value(false))
+                .andExpect(jsonPath("$.content.length()").value(3))
+                .andExpect(jsonPath("$.content[0].role").value("USER"))
+                .andExpect(jsonPath("$.content[0].content").value(question))
+                .andExpect(jsonPath("$.content[1].role").value("ASSISTANT"))
+                .andExpect(jsonPath("$.content[1].content").value(answer))
+                .andExpect(jsonPath("$.content[1].citations[0].documentId")
                         .value(documentId.toString()))
-                .andExpect(jsonPath("$[1].citations[0].similarity")
+                .andExpect(jsonPath("$.content[1].citations[0].similarity")
                         .value(closeTo(1.0, 0.0001)))
-                .andExpect(jsonPath("$[2].role").value("USER"))
-                .andExpect(jsonPath("$[2].content").value(followUpQuestion))
-                .andExpect(jsonPath("$[3].role").value("ASSISTANT"))
-                .andExpect(jsonPath("$[3].content").value(followUpAnswer))
-                .andExpect(jsonPath("$[3].citations[0].documentId")
+                .andExpect(jsonPath("$.content[2].role").value("USER"))
+                .andExpect(jsonPath("$.content[2].content").value(followUpQuestion));
+
+        mockMvc.perform(get("/api/conversations/{conversationId}/messages", conversationId)
+                        .queryParam("page", "1")
+                        .queryParam("size", "3")
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.first").value(false))
+                .andExpect(jsonPath("$.last").value(true))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].role").value("ASSISTANT"))
+                .andExpect(jsonPath("$.content[0].content").value(followUpAnswer))
+                .andExpect(jsonPath("$.content[0].citations[0].documentId")
                         .value(documentId.toString()));
 
         mockMvc.perform(get("/api/conversations/{conversationId}/messages", conversationId)
@@ -905,6 +927,31 @@ class AuthenticationHttpIntegrationTest {
                         ))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_FOUND"));
+
+        mockMvc.perform(get("/api/conversations/{conversationId}/messages", conversationId)
+                        .queryParam("page", "-1")
+                        .queryParam("size", "101")
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors.page")
+                        .value("Page must be 0 or greater"))
+                .andExpect(jsonPath("$.fieldErrors.size")
+                        .value("Page size must be 100 or fewer"));
+
+        mockMvc.perform(get("/api/conversations/{conversationId}/messages", conversationId)
+                        .queryParam("page", "not-a-number")
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors.page")
+                        .value("Value must be a valid int"));
 
         mockMvc.perform(post("/api/conversations/{conversationId}/messages", conversationId)
                         .contentType(MediaType.APPLICATION_JSON)

@@ -1,6 +1,7 @@
 package org.brian.aisupportagent.repository;
 
 import org.brian.aisupportagent.entity.ConversationMessage;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
@@ -12,8 +13,9 @@ import java.util.UUID;
 public interface ConversationMessageRepository
         extends JpaRepository<ConversationMessage, UUID> {
 
-    List<ConversationMessage> findAllByConversationIdOrderByCreatedAtAscIdAsc(
-            UUID conversationId
+    Page<ConversationMessage> findAllByConversationIdOrderByCreatedAtAscIdAsc(
+            UUID conversationId,
+            Pageable pageable
     );
 
     List<ConversationMessage> findAllByConversationIdAndIdNotOrderByCreatedAtDescIdDesc(

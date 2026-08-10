@@ -6,6 +6,7 @@ import org.brian.aisupportagent.dto.ConversationExchangeResponse;
 import org.brian.aisupportagent.dto.ConversationMessageResponse;
 import org.brian.aisupportagent.dto.KnowledgeAnswerResponse;
 import org.brian.aisupportagent.dto.KnowledgeSearchRequest;
+import org.brian.aisupportagent.dto.PagedResponse;
 import org.brian.aisupportagent.entity.User;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -51,13 +52,17 @@ public class ConversationMessageService {
     }
 
     @PreAuthorize("isAuthenticated()")
-    public List<ConversationMessageResponse> findHistory(
+    public PagedResponse<ConversationMessageResponse> findHistory(
             UUID conversationId,
-            User authenticatedUser
+            User authenticatedUser,
+            int page,
+            int size
     ) {
         return persistenceService.findHistory(
                 conversationId,
-                authenticatedUser.getId()
+                authenticatedUser.getId(),
+                page,
+                size
         );
     }
 }
