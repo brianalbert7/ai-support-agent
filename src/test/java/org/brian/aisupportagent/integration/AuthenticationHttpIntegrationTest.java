@@ -149,6 +149,37 @@ class AuthenticationHttpIntegrationTest {
     private PasswordEncoder passwordEncoder;
 
     @Test
+    void openApiDocumentationIsPublicAndDescribesJwtSecurity() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.openapi").value("3.0.1"))
+                .andExpect(jsonPath("$.info.title").value("AI Support Agent API"))
+                .andExpect(jsonPath("$.info.version").value("1.0.0"))
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
+                .andExpect(jsonPath("$.paths['/api/auth/login'].post.summary")
+                        .value("Log in with email and password"))
+                .andExpect(jsonPath("$.paths['/api/auth/login'].post.security").doesNotExist())
+                .andExpect(jsonPath("$.paths['/api/conversations'].get.summary")
+                        .value("List owned conversations"))
+                .andExpect(jsonPath("$.paths['/api/conversations'].get.security[0].bearerAuth")
+                        .isArray())
+                .andExpect(jsonPath("$.paths['/api/admin/documents/{documentId}'].delete.summary")
+                        .value("Delete a knowledge document"))
+                .andExpect(jsonPath("$.components.schemas.RegisterRequest.properties.password.type")
+                        .value("string"))
+                .andExpect(jsonPath("$.components.schemas.RegisterRequest.properties.password.minLength")
+                        .value(8));
+
+        mockMvc.perform(get("/swagger-ui.html"))
+                .andExpect(status().is3xxRedirection());
+
+        mockMvc.perform(get("/swagger-ui/index.html"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void registrationPersistsUserAndAccessTokenAuthenticatesCurrentUser() throws Exception {
         String email = uniqueEmail();
 

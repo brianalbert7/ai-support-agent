@@ -3,6 +3,9 @@ package org.brian.aisupportagent.controller;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.dto.ConversationResponse;
 import org.brian.aisupportagent.dto.CreateConversationRequest;
@@ -25,14 +28,19 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
+import static org.brian.aisupportagent.config.OpenApiConfig.BEARER_AUTH_SCHEME;
+
 @RestController
 @RequestMapping("/api/conversations")
 @RequiredArgsConstructor
+@Tag(name = "Conversations", description = "Manage authenticated conversation sessions")
+@SecurityRequirement(name = BEARER_AUTH_SCHEME)
 public class ConversationController {
 
     private final ConversationService conversationService;
 
     @PostMapping
+    @Operation(summary = "Create a conversation")
     public ResponseEntity<ConversationResponse> create(
             @Valid @RequestBody CreateConversationRequest request,
             @AuthenticationPrincipal User authenticatedUser
@@ -45,6 +53,7 @@ public class ConversationController {
     }
 
     @GetMapping
+    @Operation(summary = "List owned conversations")
     public ResponseEntity<PagedResponse<ConversationResponse>> findAll(
             @AuthenticationPrincipal User authenticatedUser,
             @RequestParam(defaultValue = "0")
@@ -63,6 +72,7 @@ public class ConversationController {
     }
 
     @GetMapping("/{conversationId}")
+    @Operation(summary = "Get an owned conversation")
     public ResponseEntity<ConversationResponse> findById(
             @PathVariable UUID conversationId,
             @AuthenticationPrincipal User authenticatedUser
@@ -74,6 +84,7 @@ public class ConversationController {
     }
 
     @PatchMapping("/{conversationId}")
+    @Operation(summary = "Rename an owned conversation")
     public ResponseEntity<ConversationResponse> update(
             @PathVariable UUID conversationId,
             @Valid @RequestBody UpdateConversationRequest request,
@@ -87,6 +98,7 @@ public class ConversationController {
     }
 
     @DeleteMapping("/{conversationId}")
+    @Operation(summary = "Delete an owned conversation")
     public ResponseEntity<Void> delete(
             @PathVariable UUID conversationId,
             @AuthenticationPrincipal User authenticatedUser

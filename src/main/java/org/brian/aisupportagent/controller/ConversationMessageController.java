@@ -3,6 +3,9 @@ package org.brian.aisupportagent.controller;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.dto.AskConversationRequest;
 import org.brian.aisupportagent.dto.ConversationExchangeResponse;
@@ -23,14 +26,19 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
+import static org.brian.aisupportagent.config.OpenApiConfig.BEARER_AUTH_SCHEME;
+
 @RestController
 @RequestMapping("/api/conversations/{conversationId}/messages")
 @RequiredArgsConstructor
+@Tag(name = "Conversation Messages", description = "Ask grounded questions and read history")
+@SecurityRequirement(name = BEARER_AUTH_SCHEME)
 public class ConversationMessageController {
 
     private final ConversationMessageService conversationMessageService;
 
     @PostMapping
+    @Operation(summary = "Ask a grounded question in a conversation")
     public ResponseEntity<ConversationExchangeResponse> ask(
             @PathVariable UUID conversationId,
             @Valid @RequestBody AskConversationRequest request,
@@ -45,6 +53,7 @@ public class ConversationMessageController {
     }
 
     @GetMapping
+    @Operation(summary = "List conversation message history")
     public ResponseEntity<PagedResponse<ConversationMessageResponse>> findHistory(
             @PathVariable UUID conversationId,
             @AuthenticationPrincipal User authenticatedUser,

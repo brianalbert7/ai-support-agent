@@ -40,6 +40,11 @@ public class SecurityConfig {
 
                 // 2. Set up request authorization rules
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                "/v3/api-docs/**",
+                                "/swagger-ui.html",
+                                "/swagger-ui/**"
+                        ).permitAll()
                         .requestMatchers("/api/auth/**").permitAll() // Permit public access to auth endpoints
                         .requestMatchers("/api/**").authenticated()  // Require authentication for all other /api/ paths
                         .anyRequest().permitAll()

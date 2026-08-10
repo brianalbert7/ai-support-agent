@@ -4,6 +4,9 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.dto.KnowledgeDocumentResponse;
 import org.brian.aisupportagent.dto.PagedResponse;
@@ -25,14 +28,19 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
+import static org.brian.aisupportagent.config.OpenApiConfig.BEARER_AUTH_SCHEME;
+
 @RestController
 @RequestMapping("/api/admin/documents")
 @RequiredArgsConstructor
+@Tag(name = "Admin Documents", description = "Manage the RAG knowledge base")
+@SecurityRequirement(name = BEARER_AUTH_SCHEME)
 public class AdminKnowledgeDocumentController {
 
     private final KnowledgeDocumentService documentService;
 
     @GetMapping
+    @Operation(summary = "List knowledge documents")
     public ResponseEntity<PagedResponse<KnowledgeDocumentResponse>> findAll(
             @RequestParam(defaultValue = "0")
             @Min(value = 0, message = "Page must be 0 or greater")
@@ -46,6 +54,7 @@ public class AdminKnowledgeDocumentController {
     }
 
     @GetMapping("/{documentId}")
+    @Operation(summary = "Get knowledge document details")
     public ResponseEntity<KnowledgeDocumentResponse> findById(
             @PathVariable UUID documentId
     ) {
@@ -53,6 +62,7 @@ public class AdminKnowledgeDocumentController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload a PDF knowledge document")
     public ResponseEntity<KnowledgeDocumentResponse> upload(
             @RequestParam
             @NotBlank(message = "Display name is required")
@@ -70,6 +80,7 @@ public class AdminKnowledgeDocumentController {
     }
 
     @PostMapping("/{documentId}/process")
+    @Operation(summary = "Process and embed a knowledge document")
     public ResponseEntity<KnowledgeDocumentResponse> process(
             @PathVariable UUID documentId
     ) {
@@ -77,6 +88,7 @@ public class AdminKnowledgeDocumentController {
     }
 
     @DeleteMapping("/{documentId}")
+    @Operation(summary = "Delete a knowledge document")
     public ResponseEntity<Void> delete(@PathVariable UUID documentId) {
         documentService.delete(documentId);
         return ResponseEntity.noContent().build();
