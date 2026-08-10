@@ -1,9 +1,12 @@
 package org.brian.aisupportagent.controller;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.dto.ConversationResponse;
 import org.brian.aisupportagent.dto.CreateConversationRequest;
+import org.brian.aisupportagent.dto.PagedResponse;
 import org.brian.aisupportagent.dto.UpdateConversationRequest;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.service.ConversationService;
@@ -17,9 +20,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -42,10 +45,21 @@ public class ConversationController {
     }
 
     @GetMapping
-    public ResponseEntity<List<ConversationResponse>> findAll(
-            @AuthenticationPrincipal User authenticatedUser
+    public ResponseEntity<PagedResponse<ConversationResponse>> findAll(
+            @AuthenticationPrincipal User authenticatedUser,
+            @RequestParam(defaultValue = "0")
+            @Min(value = 0, message = "Page must be 0 or greater")
+            int page,
+            @RequestParam(defaultValue = "20")
+            @Min(value = 1, message = "Page size must be at least 1")
+            @Max(value = 100, message = "Page size must be 100 or fewer")
+            int size
     ) {
-        return ResponseEntity.ok(conversationService.findAllFor(authenticatedUser));
+        return ResponseEntity.ok(conversationService.findAllFor(
+                authenticatedUser,
+                page,
+                size
+        ));
     }
 
     @GetMapping("/{conversationId}")

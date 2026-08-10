@@ -3,16 +3,18 @@ package org.brian.aisupportagent.service;
 import lombok.RequiredArgsConstructor;
 import org.brian.aisupportagent.dto.ConversationResponse;
 import org.brian.aisupportagent.dto.CreateConversationRequest;
+import org.brian.aisupportagent.dto.PagedResponse;
 import org.brian.aisupportagent.dto.UpdateConversationRequest;
 import org.brian.aisupportagent.entity.Conversation;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.exception.ConversationNotFoundException;
 import org.brian.aisupportagent.repository.ConversationRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -36,12 +38,27 @@ public class ConversationService {
 
     @PreAuthorize("isAuthenticated()")
     @Transactional(readOnly = true)
-    public List<ConversationResponse> findAllFor(User authenticatedUser) {
-        return conversationRepository
-                .findAllByOwnerIdOrderByUpdatedAtDesc(authenticatedUser.getId())
-                .stream()
-                .map(this::toResponse)
-                .toList();
+    public PagedResponse<ConversationResponse> findAllFor(
+            User authenticatedUser,
+            int page,
+            int size
+    ) {
+        Page<Conversation> conversationPage = conversationRepository
+                .findAllByOwnerIdOrderByUpdatedAtDescIdDesc(
+                        authenticatedUser.getId(),
+                        PageRequest.of(page, size)
+                );
+        return new PagedResponse<>(
+                conversationPage.getContent().stream()
+                        .map(this::toResponse)
+                        .toList(),
+                conversationPage.getNumber(),
+                conversationPage.getSize(),
+                conversationPage.getTotalElements(),
+                conversationPage.getTotalPages(),
+                conversationPage.isFirst(),
+                conversationPage.isLast()
+        );
     }
 
     @PreAuthorize("isAuthenticated()")
