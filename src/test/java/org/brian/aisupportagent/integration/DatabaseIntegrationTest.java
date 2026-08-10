@@ -2,6 +2,9 @@ package org.brian.aisupportagent.integration;
 
 import org.brian.aisupportagent.entity.DocumentStatus;
 import org.brian.aisupportagent.entity.Conversation;
+import org.brian.aisupportagent.entity.ConversationMessage;
+import org.brian.aisupportagent.entity.ConversationMessageCitation;
+import org.brian.aisupportagent.entity.ConversationMessageRole;
 import org.brian.aisupportagent.entity.KnowledgeDocument;
 import org.brian.aisupportagent.entity.KnowledgeDocumentChunk;
 import org.brian.aisupportagent.entity.KnowledgeDocumentPage;
@@ -11,6 +14,8 @@ import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
 import org.brian.aisupportagent.repository.ChunkEmbeddingRepository;
 import org.brian.aisupportagent.repository.ConversationRepository;
+import org.brian.aisupportagent.repository.ConversationMessageCitationRepository;
+import org.brian.aisupportagent.repository.ConversationMessageRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
 import org.brian.aisupportagent.repository.RefreshTokenRepository;
@@ -70,6 +75,12 @@ class DatabaseIntegrationTest {
     private ConversationRepository conversationRepository;
 
     @Autowired
+    private ConversationMessageRepository conversationMessageRepository;
+
+    @Autowired
+    private ConversationMessageCitationRepository conversationMessageCitationRepository;
+
+    @Autowired
     private JdbcClient jdbcClient;
 
     @Test
@@ -78,7 +89,7 @@ class DatabaseIntegrationTest {
         Integer migrationCount = jdbcClient.sql("""
                         SELECT COUNT(*)
                         FROM flyway_schema_history
-                        WHERE version IN ('1', '2', '3', '4', '5', '6', '7')
+                        WHERE version IN ('1', '2', '3', '4', '5', '6', '7', '8')
                           AND success = TRUE
                         """)
                 .query(Integer.class)
@@ -139,6 +150,36 @@ class DatabaseIntegrationTest {
                 new ChunkEmbedding(savedChunk, testEmbeddingVector())
         ));
 
+        ConversationMessage userMessage = ConversationMessage.builder()
+                .conversation(savedConversation)
+                .role(ConversationMessageRole.USER)
+                .content("How many vacation days do employees receive?")
+                .grounded(false)
+                .build();
+        ConversationMessage savedUserMessage = conversationMessageRepository.saveAndFlush(
+                userMessage
+        );
+        ConversationMessage assistantMessage = ConversationMessage.builder()
+                .conversation(savedConversation)
+                .role(ConversationMessageRole.ASSISTANT)
+                .content("Employees receive twenty vacation days [1].")
+                .grounded(true)
+                .build();
+        ConversationMessage savedAssistantMessage = conversationMessageRepository
+                .saveAndFlush(assistantMessage);
+        ConversationMessageCitation citation = ConversationMessageCitation.builder()
+                .message(savedAssistantMessage)
+                .sourceNumber(1)
+                .chunkId(savedChunk.getId())
+                .documentId(savedDocument.getId())
+                .documentName(savedDocument.getDisplayName())
+                .pageNumber(savedPage.getPageNumber())
+                .excerpt(savedChunk.getContent())
+                .similarity(1.0)
+                .build();
+        ConversationMessageCitation savedCitation = conversationMessageCitationRepository
+                .saveAndFlush(citation);
+
         Integer storedDimensions = jdbcClient.sql("""
                         SELECT vector_dims(embedding)
                         FROM knowledge_document_chunks
@@ -148,7 +189,7 @@ class DatabaseIntegrationTest {
                 .query(Integer.class)
                 .single();
 
-        assertEquals(7, migrationCount);
+        assertEquals(8, migrationCount);
         assertTrue(userRepository.findByEmail("employee@example.com").isPresent());
         assertTrue(refreshTokenRepository.findByTokenHash("a".repeat(64)).isPresent());
         assertEquals(DocumentStatus.UPLOADED, savedDocument.getStatus());
@@ -169,6 +210,13 @@ class DatabaseIntegrationTest {
         assertEquals("Vacation policy questions", savedConversation.getTitle());
         assertNotNull(savedConversation.getCreatedAt());
         assertNotNull(savedConversation.getUpdatedAt());
+        assertEquals(ConversationMessageRole.USER, savedUserMessage.getRole());
+        assertEquals(savedConversation.getId(), savedUserMessage.getConversation().getId());
+        assertNotNull(savedUserMessage.getCreatedAt());
+        assertTrue(savedAssistantMessage.isGrounded());
+        assertEquals(savedAssistantMessage.getId(), savedCitation.getMessage().getId());
+        assertEquals(savedChunk.getId(), savedCitation.getChunkId());
+        assertEquals("Employee Handbook", savedCitation.getDocumentName());
     }
 
     private float[] testEmbeddingVector() {

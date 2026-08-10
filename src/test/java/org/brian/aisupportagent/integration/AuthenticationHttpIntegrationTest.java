@@ -9,6 +9,8 @@ import org.brian.aisupportagent.entity.Role;
 import org.brian.aisupportagent.entity.User;
 import org.brian.aisupportagent.repository.KnowledgeDocumentChunkRepository;
 import org.brian.aisupportagent.repository.ChunkEmbeddingRepository;
+import org.brian.aisupportagent.repository.ConversationMessageCitationRepository;
+import org.brian.aisupportagent.repository.ConversationMessageRepository;
 import org.brian.aisupportagent.repository.ConversationRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentRepository;
 import org.brian.aisupportagent.repository.KnowledgeDocumentPageRepository;
@@ -122,6 +124,12 @@ class AuthenticationHttpIntegrationTest {
 
     @Autowired
     private ConversationRepository conversationRepository;
+
+    @Autowired
+    private ConversationMessageRepository conversationMessageRepository;
+
+    @Autowired
+    private ConversationMessageCitationRepository conversationMessageCitationRepository;
 
     @MockitoBean
     private EmbeddingModel embeddingModel;
@@ -760,6 +768,108 @@ class AuthenticationHttpIntegrationTest {
 
         assertTrue(conversationRepository.findById(secondConversationId).isPresent());
         assertEquals(conversationCountBefore + 3, conversationRepository.count());
+    }
+
+    @Test
+    void employeeStoresGroundedConversationExchangeAndReadsCitationHistory()
+            throws Exception {
+        long messageCountBefore = conversationMessageRepository.count();
+        long citationCountBefore = conversationMessageCitationRepository.count();
+        String sourceText = "Full-time employees receive twenty vacation days each year "
+                + UUID.randomUUID();
+        String question = "How many vacation days do full-time employees receive?";
+        String answer = "Full-time employees receive twenty vacation days each year [1].";
+        when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
+            List<String> inputs = invocation.getArgument(0);
+            return inputs.stream()
+                    .map(input -> testEmbeddingVector(8, 1.0f, 9, 0.0f))
+                    .toList();
+        });
+        when(embeddingModel.embed(eq(question)))
+                .thenReturn(testEmbeddingVector(8, 1.0f, 9, 0.0f));
+        when(chatModel.call(any(Prompt.class))).thenReturn(chatResponse(answer));
+        AuthenticationTokens ownerTokens = register(uniqueEmail());
+        AuthenticationTokens otherUserTokens = register(uniqueEmail());
+        AuthenticationTokens adminTokens = registerAdmin(uniqueEmail());
+        UUID conversationId = createConversation(
+                ownerTokens,
+                "Vacation questions",
+                "Vacation questions"
+        );
+        UUID documentId = uploadDocument(
+                adminTokens,
+                "Employee Handbook",
+                pdfWithPages(sourceText)
+        );
+        processDocument(adminTokens, documentId);
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/messages", conversationId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "question", "  " + question + "  ",
+                                "maxResults", 3
+                        )))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.userMessage.role").value("USER"))
+                .andExpect(jsonPath("$.userMessage.content").value(question))
+                .andExpect(jsonPath("$.userMessage.grounded").value(false))
+                .andExpect(jsonPath("$.userMessage.citations").isEmpty())
+                .andExpect(jsonPath("$.assistantMessage.role").value("ASSISTANT"))
+                .andExpect(jsonPath("$.assistantMessage.content").value(answer))
+                .andExpect(jsonPath("$.assistantMessage.grounded").value(true))
+                .andExpect(jsonPath("$.assistantMessage.citations.length()").value(1))
+                .andExpect(jsonPath("$.assistantMessage.citations[0].documentId")
+                        .value(documentId.toString()))
+                .andExpect(jsonPath("$.assistantMessage.citations[0].documentName")
+                        .value("Employee Handbook"))
+                .andExpect(jsonPath("$.assistantMessage.citations[0].pageNumber").value(1))
+                .andExpect(jsonPath("$.assistantMessage.citations[0].excerpt")
+                        .value(containsString(
+                                "Full-time employees receive twenty vacation days"
+                        )))
+                .andExpect(jsonPath("$.assistantMessage.createdAt").isNotEmpty());
+
+        mockMvc.perform(get("/api/conversations/{conversationId}/messages", conversationId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].role").value("USER"))
+                .andExpect(jsonPath("$[0].content").value(question))
+                .andExpect(jsonPath("$[1].role").value("ASSISTANT"))
+                .andExpect(jsonPath("$[1].content").value(answer))
+                .andExpect(jsonPath("$[1].citations[0].documentId")
+                        .value(documentId.toString()))
+                .andExpect(jsonPath("$[1].citations[0].similarity")
+                        .value(closeTo(1.0, 0.0001)));
+
+        mockMvc.perform(get("/api/conversations/{conversationId}/messages", conversationId)
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(otherUserTokens.accessToken())
+                        ))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CONVERSATION_NOT_FOUND"));
+
+        mockMvc.perform(post("/api/conversations/{conversationId}/messages", conversationId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("question", " ")))
+                        .header(
+                                HttpHeaders.AUTHORIZATION,
+                                bearer(ownerTokens.accessToken())
+                        ))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors.question").value("Question is required"));
+
+        assertEquals(messageCountBefore + 2, conversationMessageRepository.count());
+        assertEquals(citationCountBefore + 1, conversationMessageCitationRepository.count());
     }
 
     private AuthenticationTokens register(String email) throws Exception {
