@@ -27,6 +27,7 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 - Flyway database migrations
 - OpenAPI 3.0 documentation and Swagger UI
 - Actuator liveness and database-aware readiness checks
+- Validated request correlation IDs and structured ECS container logs
 - Unit and Testcontainers integration tests with enforced JaCoCo coverage
 - GitHub Actions CI for tests and production-image build verification
 - Multi-stage, non-root application container with a read-only root filesystem
@@ -36,7 +37,8 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 
 ```mermaid
 flowchart LR
-    Client["Client or Swagger UI"] --> Security["Spring Security + JWT filter"]
+    Client["Client or Swagger UI"] --> Correlation["Request correlation filter"]
+    Correlation --> Security["Spring Security + JWT filter"]
     Security --> Controllers["REST controllers"]
     Controllers --> Services["Application services"]
     Services --> JPA["Spring Data JPA repositories"]
@@ -150,7 +152,7 @@ Flyway is the source of truth for the database schema. Hibernate uses `ddl-auto=
 | Migrations | Flyway |
 | API documentation | springdoc-openapi, Swagger UI |
 | Testing | JUnit 5, Mockito, MockMvc, Testcontainers, JaCoCo |
-| Operations | Spring Boot Actuator health probes |
+| Operations | Actuator health probes, correlation IDs, structured ECS logs |
 | Infrastructure | Multi-stage Docker image, Docker Compose, pgAdmin, GitHub Actions CI |
 | Build | Maven Wrapper |
 
@@ -340,6 +342,9 @@ Required variables have no application default. Optional values are shown with t
 | `APP_PORT` | No | `8080` | Compose application host port |
 | `POSTGRES_PORT` | No | `5432` | Compose PostgreSQL host port |
 | `PGADMIN_PORT` | No | `5050` | Compose pgAdmin host port |
+| `LOGGING_STRUCTURED_FORMAT_CONSOLE` | No | Compose: `ecs` | Container console-log format; leave unset for readable IntelliJ logs |
+| `SPRING_SECURITY_LOG_LEVEL` | No | `INFO` | Spring Security log verbosity |
+| `SPRING_JPA_SHOW_SQL` | No | `false` | Print Hibernate SQL for temporary local debugging |
 | `OPENAI_CHAT_MODEL` | No | `gpt-5-mini` | Answer-generation model |
 | `OPENAI_CHAT_MAX_COMPLETION_TOKENS` | No | `600` | Maximum answer tokens |
 | `OPENAI_CHAT_REASONING_EFFORT` | No | `low` | Chat-model reasoning effort |
@@ -384,6 +389,14 @@ The `.github/workflows/ci.yml` workflow runs for pull requests targeting `main`,
 2. After every test passes, build `docker/Dockerfile` without publishing the image. This verifies that the same production image used by Docker Compose remains buildable.
 
 The workflow uses read-only repository permissions and does not require an OpenAI key, JWT secret, database password, or container-registry credentials. Tests provide isolated test configuration, mock OpenAI models, and create a temporary PostgreSQL/pgvector database through Testcontainers.
+
+## Operational logging
+
+Every HTTP response includes an `X-Request-ID`. A client-supplied ID is preserved only when it contains 1–100 letters, digits, periods, underscores, or hyphens; otherwise the application generates a UUID. The filter places the value in SLF4J's Mapped Diagnostic Context (MDC) before Spring Security runs and always removes it afterward so servlet threads cannot leak request context into later work.
+
+Completed non-health requests produce one access-log event containing the HTTP method, URI path, response status, and duration. Request bodies, query strings, authorization headers, JWTs, and user questions are deliberately excluded.
+
+IntelliJ uses readable console logs containing the request ID. Docker Compose defaults to Spring Boot's Elastic Common Schema (ECS) JSON format, which includes MDC and structured key-value fields and can be ingested by centralized logging platforms. SQL statements and Spring Security DEBUG output are disabled by default but can be enabled temporarily through environment configuration.
 
 ## Error handling
 
@@ -430,13 +443,13 @@ Confirm that `OPENAI_API_KEY` is present, the account can use the configured mod
 
 - Document processing is synchronous; a production version should use background jobs with retry and progress reporting.
 - Files use local disk storage; production deployment should use durable object storage such as S3-compatible storage.
-- The application needs rate limiting, structured observability, and production-specific logging configuration.
+- The application still needs rate limiting and production metrics/tracing beyond its health and structured logging foundation.
 - Administrator provisioning is manual in local development and needs a controlled audited workflow.
 - The backend has no frontend yet; Swagger UI is the current interactive client.
 - Compose provides a strong single-host deployment baseline, but production still needs managed secrets, TLS, an image registry, backups, and an orchestration or hosting strategy.
 - Retrieval quality should eventually be evaluated with a repeatable question-and-answer dataset rather than intuition alone.
 
-## Interview talking points
+## FAQs
 
 1. **Why RAG?** It grounds answers in company-controlled data, reduces hallucinations, and provides traceable evidence.
 2. **Why store pages separately from chunks?** Pages preserve human-readable citation provenance; chunks provide model-sized retrieval units.
@@ -447,3 +460,4 @@ Confirm that `OPENAI_API_KEY` is present, the account can use the configured mod
 7. **How is prompt injection addressed?** Retrieved documents and prior messages are delimited as untrusted context, and model citations are validated before returning or persisting an answer.
 8. **How is schema drift prevented?** Flyway owns schema evolution and Hibernate validates mappings at startup.
 9. **How is the container hardened?** A multi-stage build keeps build tools out of the runtime image; the process runs as a non-root user with a read-only root filesystem, a writable document volume, a temporary filesystem, and no-new-privileges enabled.
+10. **How are requests traced through logs?** A highest-priority filter validates or generates an `X-Request-ID`, stores it in MDC across security and application processing, returns it to the caller, and removes it in a `finally` block. Docker emits the result as structured ECS JSON.

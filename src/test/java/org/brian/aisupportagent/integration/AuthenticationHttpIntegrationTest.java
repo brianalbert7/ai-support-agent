@@ -1,6 +1,7 @@
 package org.brian.aisupportagent.integration;
 
 import com.jayway.jsonpath.JsonPath;
+import org.brian.aisupportagent.config.RequestCorrelationFilter;
 import org.brian.aisupportagent.entity.Conversation;
 import org.brian.aisupportagent.entity.ConversationMessage;
 import org.brian.aisupportagent.entity.ConversationMessageCitation;
@@ -71,6 +72,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.any;
@@ -161,6 +163,17 @@ class AuthenticationHttpIntegrationTest {
         mockMvc.perform(get("/actuator/health/liveness"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    @Test
+    void correlationIdIsReturnedWhenSecurityRejectsRequest() throws Exception {
+        mockMvc.perform(get("/api/users/me")
+                        .header(RequestCorrelationFilter.REQUEST_ID_HEADER, "portfolio-request-123"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(
+                        RequestCorrelationFilter.REQUEST_ID_HEADER,
+                        "portfolio-request-123"
+                ));
     }
 
     @Test
