@@ -1,6 +1,6 @@
 # AI Support Agent
 
-A production-minded Spring Boot backend for an internal knowledge assistant. Administrators upload PDF documents, and authenticated employees ask questions that are answered only from the uploaded knowledge base with document and page citations.
+A production-minded Spring Boot application for an internal knowledge assistant. Administrators upload PDF documents, and authenticated employees ask questions that are answered only from the uploaded knowledge base with document and page citations. A React and TypeScript client lives in `frontend/` and is being developed as an independently buildable interface for the API.
 
 The project demonstrates a complete retrieval-augmented generation (RAG) workflow rather than sending an ungrounded prompt directly to a language model.
 
@@ -32,12 +32,13 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 - GitHub Actions CI for tests and production-image build verification
 - Multi-stage, non-root application container with a read-only root filesystem
 - Docker Compose stack for the application, PostgreSQL/pgvector, and pgAdmin
+- Independently buildable React, TypeScript, and Vite frontend foundation
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Client["Client or Swagger UI"] --> Correlation["Request correlation filter"]
+    Client["React client or Swagger UI"] --> Correlation["Request correlation filter"]
     Correlation --> Security["Spring Security + JWT filter"]
     Security --> Controllers["REST controllers"]
     Controllers --> Services["Application services"]
