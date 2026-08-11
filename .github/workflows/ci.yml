@@ -39,6 +39,15 @@ jobs:
       - name: Run Maven verification
         run: ./mvnw --batch-mode --no-transfer-progress verify
 
+      - name: Upload JaCoCo coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-coverage-report
+          path: target/site/jacoco
+          if-no-files-found: ignore
+          retention-days: 14
+
   docker-image:
     name: Build Docker image
     needs: test

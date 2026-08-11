@@ -27,7 +27,7 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 - Flyway database migrations
 - OpenAPI 3.0 documentation and Swagger UI
 - Actuator liveness and database-aware readiness checks
-- Unit and Testcontainers integration tests
+- Unit and Testcontainers integration tests with enforced JaCoCo coverage
 - GitHub Actions CI for tests and production-image build verification
 - Multi-stage, non-root application container with a read-only root filesystem
 - Docker Compose stack for the application, PostgreSQL/pgvector, and pgAdmin
@@ -149,7 +149,7 @@ Flyway is the source of truth for the database schema. Hibernate uses `ddl-auto=
 | Database | PostgreSQL 16, pgvector |
 | Migrations | Flyway |
 | API documentation | springdoc-openapi, Swagger UI |
-| Testing | JUnit 5, Mockito, MockMvc, Testcontainers |
+| Testing | JUnit 5, Mockito, MockMvc, Testcontainers, JaCoCo |
 | Operations | Spring Boot Actuator health probes |
 | Infrastructure | Multi-stage Docker image, Docker Compose, pgAdmin, GitHub Actions CI |
 | Build | Maven Wrapper |
@@ -361,7 +361,7 @@ The embedding model and vector column both use 1,536 dimensions. Changing that d
 Run the complete suite:
 
 ```bash
-./mvnw test
+./mvnw verify
 ```
 
 The test strategy includes:
@@ -374,11 +374,13 @@ The test strategy includes:
 
 Docker must be running for the container-backed integration tests. Tests marked with `disabledWithoutDocker` are skipped when Docker is unavailable.
 
+The `verify` phase also generates a JaCoCo report at `target/site/jacoco/index.html` and enforces bundle-wide minimums of 90% line coverage and 70% branch coverage. All production packages are included. A coverage gate prevents the test suite from becoming less effective over time, but a covered line still needs meaningful assertions to prove correct behavior.
+
 ## Continuous integration
 
 The `.github/workflows/ci.yml` workflow runs for pull requests targeting `main`, pushes to `main`, and manual dispatches. It performs two ordered jobs:
 
-1. Configure Java 21, restore the Maven dependency cache, confirm Docker is available, and run `./mvnw verify`. Docker availability ensures the Testcontainers integration tests run instead of being skipped.
+1. Configure Java 21, restore the Maven dependency cache, confirm Docker is available, and run `./mvnw verify`. Docker availability ensures the Testcontainers integration tests run instead of being skipped. JaCoCo then generates and checks the coverage report, which GitHub retains as a downloadable workflow artifact for 14 days.
 2. After every test passes, build `docker/Dockerfile` without publishing the image. This verifies that the same production image used by Docker Compose remains buildable.
 
 The workflow uses read-only repository permissions and does not require an OpenAI key, JWT secret, database password, or container-registry credentials. Tests provide isolated test configuration, mock OpenAI models, and create a temporary PostgreSQL/pgvector database through Testcontainers.
