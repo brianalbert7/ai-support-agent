@@ -43,7 +43,9 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/v3/api-docs/**",
                                 "/swagger-ui.html",
-                                "/swagger-ui/**"
+                                "/swagger-ui/**",
+                                "/actuator/health",
+                                "/actuator/health/**"
                         ).permitAll()
                         .requestMatchers("/api/auth/**").permitAll() // Permit public access to auth endpoints
                         .requestMatchers("/api/**").authenticated()  // Require authentication for all other /api/ paths

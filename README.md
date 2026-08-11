@@ -26,8 +26,10 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 - Request validation and centralized JSON exception handling
 - Flyway database migrations
 - OpenAPI 3.0 documentation and Swagger UI
+- Actuator liveness and database-aware readiness checks
 - Unit and Testcontainers integration tests
-- Docker Compose development infrastructure for PostgreSQL/pgvector and pgAdmin
+- Multi-stage, non-root application container with a read-only root filesystem
+- Docker Compose stack for the application, PostgreSQL/pgvector, and pgAdmin
 
 ## Architecture
 
@@ -117,6 +119,8 @@ src/main/java/org/brian/aisupportagent/
 
 Database migrations live in `src/main/resources/db/migration`, and tests mirror the main application under `src/test/java`.
 
+Container build instructions live in `docker/Dockerfile`; `docker-compose.yml` assembles the application and its development infrastructure.
+
 ## Data model
 
 | Entity | Responsibility |
@@ -145,7 +149,8 @@ Flyway is the source of truth for the database schema. Hibernate uses `ddl-auto=
 | Migrations | Flyway |
 | API documentation | springdoc-openapi, Swagger UI |
 | Testing | JUnit 5, Mockito, MockMvc, Testcontainers |
-| Infrastructure | Docker Compose, pgAdmin |
+| Operations | Spring Boot Actuator health probes |
+| Infrastructure | Multi-stage Docker image, Docker Compose, pgAdmin |
 | Build | Maven Wrapper |
 
 ## Security design
@@ -187,35 +192,47 @@ openssl rand -base64 32
 
 Put the generated value in `JWT_SECRET`, choose local database and pgAdmin passwords, and add your OpenAI API key. The real `.env` file is ignored by Git.
 
-### 2. Start PostgreSQL and pgAdmin
+### 2. Choose how to run the application
+
+#### Option A: Run the complete Docker stack
 
 ```bash
-docker compose up -d
+docker compose up --build -d
 docker compose ps
 ```
 
-The PostgreSQL service must show the `pgvector/pgvector:0.8.2-pg16` image. Compose stores database data in a named volume, so ordinary container recreation does not delete it.
+Compose builds the Spring Boot image, starts PostgreSQL, waits for database health, and then starts the application. The application is healthy only after its database-aware readiness endpoint reports `UP`.
+
+Follow application logs with:
+
+```bash
+docker compose logs -f app
+```
 
 Services:
 
 | Service | Address |
 | --- | --- |
+| Application | `http://localhost:8080` |
+| Readiness | `http://localhost:8080/actuator/health/readiness` |
 | PostgreSQL | `localhost:5432` |
 | pgAdmin | `http://localhost:5050` |
 
-Register the database in pgAdmin with:
+The PostgreSQL service must show the `pgvector/pgvector:0.8.2-pg16` image. Database records and uploaded PDFs use separate named volumes, so ordinary container recreation does not delete them.
 
-| Setting | Value |
-| --- | --- |
-| Host | `postgres` |
-| Port | `5432` |
-| Maintenance database | Value of `POSTGRES_DB` |
-| Username | Value of `DB_USERNAME` |
-| Password | Value of `DB_PASSWORD` |
+Stop the stack while preserving both volumes with:
 
-Use `postgres` as the host because pgAdmin and PostgreSQL are containers on the same Compose network. An application running from IntelliJ uses `localhost` through the published host port.
+```bash
+docker compose down
+```
 
-### 3. Configure IntelliJ IDEA
+#### Option B: Run infrastructure in Docker and Spring Boot in IntelliJ
+
+Start only the dependencies:
+
+```bash
+docker compose up -d postgres pgadmin
+```
 
 Open `AiSupportAgentApplication` and create a Spring Boot run configuration. IntelliJ does not automatically load the repository's `.env` file, so add these required environment variables to the run configuration:
 
@@ -233,6 +250,22 @@ Run the application and wait for both messages:
 Tomcat started on port 8080
 Started AiSupportAgentApplication
 ```
+
+Do not start the Compose `app` service at the same time as IntelliJ unless you change `APP_PORT`; both otherwise publish port 8080.
+
+### 3. Connect pgAdmin
+
+Register the database in pgAdmin with:
+
+| Setting | Value |
+| --- | --- |
+| Host | `postgres` |
+| Port | `5432` |
+| Maintenance database | Value of `POSTGRES_DB` |
+| Username | Value of `DB_USERNAME` |
+| Password | Value of `DB_PASSWORD` |
+
+Use `postgres` as the host because pgAdmin and PostgreSQL are containers on the same Compose network. An application running from IntelliJ uses `localhost` through the published host port.
 
 ### 4. Open the API documentation
 
@@ -303,10 +336,13 @@ Required variables have no application default. Optional values are shown with t
 | `DB_PASSWORD` | Yes | — | Database and Compose password |
 | `JWT_SECRET` | Yes | — | Base64-encoded JWT signing key |
 | `OPENAI_API_KEY` | Yes | — | OpenAI authentication |
+| `APP_PORT` | No | `8080` | Compose application host port |
+| `POSTGRES_PORT` | No | `5432` | Compose PostgreSQL host port |
+| `PGADMIN_PORT` | No | `5050` | Compose pgAdmin host port |
 | `OPENAI_CHAT_MODEL` | No | `gpt-5-mini` | Answer-generation model |
 | `OPENAI_CHAT_MAX_COMPLETION_TOKENS` | No | `600` | Maximum answer tokens |
 | `OPENAI_CHAT_REASONING_EFFORT` | No | `low` | Chat-model reasoning effort |
-| `DOCUMENT_STORAGE_PATH` | No | `./data/documents` | Uploaded PDF storage |
+| `DOCUMENT_STORAGE_PATH` | No | `./data/documents` | Host-run uploaded PDF storage; Compose uses its document volume |
 | `DOCUMENT_MAX_FILE_SIZE` | No | `10MB` | File validation and multipart limit |
 | `DOCUMENT_MAX_REQUEST_SIZE` | No | `11MB` | Multipart request limit |
 | `RAG_CHUNK_TARGET_TOKENS` | No | `500` | Target chunk size |
@@ -359,9 +395,20 @@ The named database volume is preserved. Do not add `-v` to `docker compose down`
 
 Docker Compose reads `.env`, but IntelliJ does not load it automatically. Add the required values to the Spring Boot run configuration.
 
-### Port 5432 or 5050 is already in use
+### A container is unhealthy
 
-Stop the conflicting local process or change the corresponding host-side port in `docker-compose.yml`. If the database port changes, update `DB_URL` too.
+Inspect the failing service and its recent logs:
+
+```bash
+docker compose ps
+docker compose logs --tail=200 app postgres
+```
+
+PostgreSQL readiness is checked with `pg_isready`. Application readiness is checked through `/actuator/health/readiness` and includes Spring's readiness state, database connectivity, and disk space.
+
+### Port 5432, 5050, or 8080 is already in use
+
+Stop the conflicting local process or change `POSTGRES_PORT`, `PGADMIN_PORT`, or `APP_PORT` in `.env`. If the database port changes for an IntelliJ-run application, update `DB_URL` too; container-to-container traffic continues using port 5432.
 
 ### The AI request fails
 
@@ -374,7 +421,7 @@ Confirm that `OPENAI_API_KEY` is present, the account can use the configured mod
 - The application needs rate limiting, structured observability, and production-specific logging configuration.
 - Administrator provisioning is manual in local development and needs a controlled audited workflow.
 - The backend has no frontend yet; Swagger UI is the current interactive client.
-- Docker Compose currently runs development infrastructure. The application image still needs a verified multi-stage build, non-root runtime user, health checks, and a complete production Compose profile.
+- Compose provides a strong single-host deployment baseline, but production still needs managed secrets, TLS, an image registry, backups, and an orchestration or hosting strategy.
 - Retrieval quality should eventually be evaluated with a repeatable question-and-answer dataset rather than intuition alone.
 
 ## Interview talking points
@@ -387,3 +434,4 @@ Confirm that `OPENAI_API_KEY` is present, the account can use the configured mod
 6. **Why persist citation snapshots?** Conversation history remains explainable even if the underlying document is later changed or removed.
 7. **How is prompt injection addressed?** Retrieved documents and prior messages are delimited as untrusted context, and model citations are validated before returning or persisting an answer.
 8. **How is schema drift prevented?** Flyway owns schema evolution and Hibernate validates mappings at startup.
+9. **How is the container hardened?** A multi-stage build keeps build tools out of the runtime image; the process runs as a non-root user with a read-only root filesystem, a writable document volume, a temporary filesystem, and no-new-privileges enabled.
