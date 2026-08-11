@@ -28,6 +28,7 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 - OpenAPI 3.0 documentation and Swagger UI
 - Actuator liveness and database-aware readiness checks
 - Unit and Testcontainers integration tests
+- GitHub Actions CI for tests and production-image build verification
 - Multi-stage, non-root application container with a read-only root filesystem
 - Docker Compose stack for the application, PostgreSQL/pgvector, and pgAdmin
 
@@ -150,7 +151,7 @@ Flyway is the source of truth for the database schema. Hibernate uses `ddl-auto=
 | API documentation | springdoc-openapi, Swagger UI |
 | Testing | JUnit 5, Mockito, MockMvc, Testcontainers |
 | Operations | Spring Boot Actuator health probes |
-| Infrastructure | Multi-stage Docker image, Docker Compose, pgAdmin |
+| Infrastructure | Multi-stage Docker image, Docker Compose, pgAdmin, GitHub Actions CI |
 | Build | Maven Wrapper |
 
 ## Security design
@@ -372,6 +373,15 @@ The test strategy includes:
 - Mocked OpenAI chat and embedding models so tests are deterministic and do not spend API credits
 
 Docker must be running for the container-backed integration tests. Tests marked with `disabledWithoutDocker` are skipped when Docker is unavailable.
+
+## Continuous integration
+
+The `.github/workflows/ci.yml` workflow runs for pull requests targeting `main`, pushes to `main`, and manual dispatches. It performs two ordered jobs:
+
+1. Configure Java 21, restore the Maven dependency cache, confirm Docker is available, and run `./mvnw verify`. Docker availability ensures the Testcontainers integration tests run instead of being skipped.
+2. After every test passes, build `docker/Dockerfile` without publishing the image. This verifies that the same production image used by Docker Compose remains buildable.
+
+The workflow uses read-only repository permissions and does not require an OpenAI key, JWT secret, database password, or container-registry credentials. Tests provide isolated test configuration, mock OpenAI models, and create a temporary PostgreSQL/pgvector database through Testcontainers.
 
 ## Error handling
 
