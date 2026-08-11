@@ -278,6 +278,19 @@ Use `postgres` as the host because pgAdmin and PostgreSQL are containers on the 
 
 Swagger UI can call the public registration and login endpoints without a token. For protected endpoints, copy the returned `accessToken`, click **Authorize**, and paste the raw token. Swagger adds the `Bearer` prefix.
 
+### 5. Run the React client
+
+Keep Spring Boot running on port 8080. In a second terminal:
+
+```bash
+cd frontend
+nvm use
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. The Vite development server proxies `/api` requests to Spring Boot, so the browser client does not require a development-only CORS exception. The frontend supports registration, login, protected routes, automatic access-token refresh, and logout. It is not yet included in the Docker Compose stack.
+
 ## Create a local administrator
 
 Registration intentionally creates only employees. For local development, register a user and then promote that account directly in PostgreSQL:

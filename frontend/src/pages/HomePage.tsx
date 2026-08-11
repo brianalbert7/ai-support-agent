@@ -1,3 +1,6 @@
+import { Link } from 'react-router-dom'
+import { useAuth } from '../auth/AuthContext'
+
 const workflowSteps = [
   {
     number: '01',
@@ -17,6 +20,8 @@ const workflowSteps = [
 ]
 
 export default function HomePage() {
+  const { status } = useAuth()
+
   return (
     <main>
       <header className="site-header">
@@ -24,7 +29,14 @@ export default function HomePage() {
           <span className="brand-mark" aria-hidden="true">AI</span>
           <span>AI Support Agent</span>
         </a>
-        <a className="header-link" href="#workflow">How it works</a>
+        <nav className="header-actions" aria-label="Primary navigation">
+          <a className="header-link" href="#workflow">How it works</a>
+          {status === 'authenticated' ? (
+            <Link className="compact-action" to="/app">Open workspace</Link>
+          ) : (
+            <Link className="compact-action" to="/login">Sign in</Link>
+          )}
+        </nav>
       </header>
 
       <section className="hero" id="top">
@@ -36,7 +48,11 @@ export default function HomePage() {
             documentation. Get concise answers backed by the exact source and page.
           </p>
           <div className="hero-actions">
-            <a className="primary-action" href="#workflow">Explore the workflow</a>
+            {status === 'authenticated' ? (
+              <Link className="primary-action" to="/app">Open your workspace</Link>
+            ) : (
+              <Link className="primary-action" to="/register">Create an account</Link>
+            )}
             <span className="availability"><span aria-hidden="true" />Cited answer preview</span>
           </div>
         </div>
