@@ -1,6 +1,6 @@
 # AI Support Agent frontend
 
-React and TypeScript client for the AI Support Agent backend. It provides a responsive product shell, typed API boundary, JWT authentication, protected routing, and frontend tests. Document administration and grounded conversation screens are implemented in later phases.
+React and TypeScript client for the AI Support Agent backend. It provides a responsive product shell, typed API boundary, JWT authentication, protected routing, administrator document management, and frontend tests. Grounded conversation screens are implemented in a later phase.
 
 ## Authentication design
 
@@ -12,6 +12,15 @@ React and TypeScript client for the AI Support Agent backend. It provides a resp
 - `/app` is protected, while `/login` and `/register` redirect authenticated users back to the workspace.
 
 `sessionStorage` is a deliberate compromise for the current token-in-response backend contract. It is still readable by JavaScript if an XSS vulnerability exists. A stronger production design would use a `Secure`, `HttpOnly`, `SameSite` refresh-token cookie with an appropriate CSRF strategy.
+
+## Document management design
+
+- Only administrators see the document navigation and can enter `/app/documents`.
+- Spring service-layer authorization remains authoritative even if someone manually enters the URL.
+- Uploads use multipart form data and retain the backend's 10 MB PDF validation.
+- Upload and processing remain separate operations so `FAILED` documents can display their reason and be retried.
+- The paginated list reflects the backend lifecycle states: `UPLOADED`, `PROCESSING`, `READY`, and `FAILED`.
+- PostgreSQL and backend file storage remain the source of truth; documents are never persisted in browser storage.
 
 ## Local development
 
@@ -33,6 +42,7 @@ Available routes:
 | `/login` | User login |
 | `/register` | Employee registration |
 | `/app` | Authenticated workspace |
+| `/app/documents` | Administrator document management |
 
 ## Commands
 

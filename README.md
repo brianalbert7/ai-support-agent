@@ -32,7 +32,7 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 - GitHub Actions CI for tests and production-image build verification
 - Multi-stage, non-root application container with a read-only root filesystem
 - Docker Compose stack for the application, PostgreSQL/pgvector, and pgAdmin
-- Independently buildable React, TypeScript, and Vite frontend foundation
+- Independently buildable React, TypeScript, and Vite client with authentication and admin document management
 
 ## Architecture
 
@@ -289,7 +289,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. The Vite development server proxies `/api` requests to Spring Boot, so the browser client does not require a development-only CORS exception. The frontend supports registration, login, protected routes, automatic access-token refresh, and logout. It is not yet included in the Docker Compose stack.
+Open `http://localhost:5173`. The Vite development server proxies `/api` requests to Spring Boot, so the browser client does not require a development-only CORS exception. The frontend supports registration, login, protected routes, automatic access-token refresh, logout, and the administrator PDF ingestion lifecycle. It is not yet included in the Docker Compose stack.
 
 ## Create a local administrator
 
@@ -459,7 +459,7 @@ Confirm that `OPENAI_API_KEY` is present, the account can use the configured mod
 - Files use local disk storage; production deployment should use durable object storage such as S3-compatible storage.
 - The application still needs rate limiting and production metrics/tracing beyond its health and structured logging foundation.
 - Administrator provisioning is manual in local development and needs a controlled audited workflow.
-- The backend has no frontend yet; Swagger UI is the current interactive client.
+- The React client currently covers authentication and administrator document ingestion; the grounded conversation interface is the next frontend milestone, while Swagger UI remains available for every endpoint.
 - Compose provides a strong single-host deployment baseline, but production still needs managed secrets, TLS, an image registry, backups, and an orchestration or hosting strategy.
 - Retrieval quality should eventually be evaluated with a repeatable question-and-answer dataset rather than intuition alone.
 

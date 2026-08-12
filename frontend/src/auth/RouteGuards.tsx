@@ -38,3 +38,13 @@ export function PublicOnlyRoute() {
 
   return <Outlet />
 }
+
+export function AdminRoute() {
+  const { user } = useAuth()
+
+  if (user?.role !== 'ADMIN') {
+    return <Navigate to="/app/access-denied" replace />
+  }
+
+  return <Outlet />
+}
