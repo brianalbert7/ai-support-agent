@@ -52,7 +52,7 @@ export function listConversationMessages(
 export function askConversation(
   conversationId: string,
   question: string,
-  maxResults = 5,
+  maxResults = 10,
 ): Promise<ConversationExchange> {
   return authenticatedApiRequest<ConversationExchange>(
     `${conversationPath(conversationId)}/messages`,
