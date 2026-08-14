@@ -14,8 +14,8 @@ export default function DashboardPage() {
           <p className="eyebrow"><span aria-hidden="true" />Authenticated workspace</p>
           <h1>Your knowledge workspace.</h1>
           <p>
-            You are securely connected as <strong>{user.email}</strong>. Document management
-            and grounded conversations will be added in the next focused frontend phases.
+            You are securely connected as <strong>{user.email}</strong>. Ask questions against
+            the shared knowledge base and inspect the evidence behind each answer.
           </p>
         </div>
 
@@ -42,15 +42,15 @@ export default function DashboardPage() {
             </article>
           )}
 
-          <article className="workspace-card">
+          <Link className="workspace-card card-link" to="/app/conversations">
             <span className="card-index">02</span>
             <div>
               <p className="card-kicker">Conversations</p>
               <h2>Ask questions that stay grounded.</h2>
               <p>Continue user-owned conversations and inspect their persisted citations.</p>
             </div>
-            <span className="coming-soon">Planned</span>
-          </article>
+            <span className="coming-soon">Start asking</span>
+          </Link>
         </div>
     </section>
   )

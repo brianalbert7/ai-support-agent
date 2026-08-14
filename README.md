@@ -291,7 +291,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. The Vite development server proxies `/api` requests to Spring Boot, so the browser client does not require a development-only CORS exception. The frontend supports registration, login, protected routes, automatic access-token refresh, logout, and the administrator PDF ingestion lifecycle. It is not yet included in the Docker Compose stack.
+Open `http://localhost:5173`. The Vite development server proxies `/api` requests to Spring Boot, so the browser client does not require a development-only CORS exception. The frontend supports registration, login, protected routes, automatic access-token refresh, logout, the administrator PDF ingestion lifecycle, and grounded conversations with expandable citations. It is not yet included in the Docker Compose stack.
 
 ## Create a local administrator
 
@@ -307,17 +307,14 @@ This manual promotion is for local development only. A production system would u
 
 ## Suggested demo workflow
 
-Use Swagger UI to demonstrate the complete application:
+Use the React client for the clearest product demo, while Swagger UI remains useful for inspecting the API contract:
 
-1. Register a user with `POST /api/auth/register`.
-2. Promote that user to `ADMIN` in the local database.
-3. Log in with `POST /api/auth/login` and authorize Swagger with the new access token.
-4. Upload a PDF with `POST /api/admin/documents`.
-5. Process it with `POST /api/admin/documents/{documentId}/process`.
-6. Create a conversation with `POST /api/conversations`.
-7. Ask a grounded question with `POST /api/conversations/{conversationId}/messages`.
-8. Ask a follow-up question that depends on recent conversation context.
-9. Retrieve the message history and inspect each persisted citation.
+1. Start the backend and frontend, then sign in with a prepared administrator account.
+2. Open **Documents**, upload a PDF, and process it into searchable evidence.
+3. Open **Conversations** and create a named conversation.
+4. Ask a grounded question and expand its source card to show the document, page, and excerpt.
+5. Ask a follow-up question that depends on recent conversation context.
+6. Refresh the page to show that the message and citation history was persisted.
 
 ## API overview
 
@@ -461,7 +458,7 @@ Confirm that `OPENAI_API_KEY` is present, the account can use the configured mod
 - Files use local disk storage; production deployment should use durable object storage such as S3-compatible storage.
 - The application still needs rate limiting and production metrics/tracing beyond its health and structured logging foundation.
 - Administrator provisioning is manual in local development and needs a controlled audited workflow.
-- The React client currently covers authentication and administrator document ingestion; the grounded conversation interface is the next frontend milestone, while Swagger UI remains available for every endpoint.
+- The React conversation screen currently loads the first 100 chronological messages; a production version should add cursor-based history loading for very long conversations.
 - Compose provides a strong single-host deployment baseline, but production still needs managed secrets, TLS, an image registry, backups, and an orchestration or hosting strategy.
 - Contextual follow-ups add a small query-rewrite model call; production usage should measure its retrieval-quality benefit against added latency and token cost.
 - Retrieval quality should eventually be evaluated with a repeatable question-and-answer dataset rather than intuition alone.

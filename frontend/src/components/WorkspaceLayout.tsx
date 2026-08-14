@@ -29,6 +29,7 @@ export default function WorkspaceLayout() {
 
         <nav className="workspace-nav" aria-label="Workspace navigation">
           <NavLink to="/app" end>Overview</NavLink>
+          <NavLink to="/app/conversations">Conversations</NavLink>
           {user.role === 'ADMIN' && <NavLink to="/app/documents">Documents</NavLink>}
         </nav>
 

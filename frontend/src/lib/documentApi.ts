@@ -1,5 +1,6 @@
 import { authenticatedApiRequest } from '../auth/authSession'
-import type { KnowledgeDocument, PagedResponse } from '../types/document'
+import type { PagedResponse } from '../types/api'
+import type { KnowledgeDocument } from '../types/document'
 
 export function listDocuments(
   page: number,

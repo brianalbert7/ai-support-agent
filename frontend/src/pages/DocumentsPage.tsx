@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { getErrorMessage } from '../lib/apiError'
 import { listDocuments, processDocument, uploadDocument } from '../lib/documentApi'
-import type { KnowledgeDocument, PagedResponse } from '../types/document'
+import type { PagedResponse } from '../types/api'
+import type { KnowledgeDocument } from '../types/document'
 
 const PAGE_SIZE = 10
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024

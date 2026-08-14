@@ -1,6 +1,6 @@
 # AI Support Agent frontend
 
-React and TypeScript client for the AI Support Agent backend. It provides a responsive product shell, typed API boundary, JWT authentication, protected routing, administrator document management, and frontend tests. Grounded conversation screens are implemented in a later phase.
+React and TypeScript client for the AI Support Agent backend. It provides a responsive product shell, typed API boundary, JWT authentication, protected routing, administrator document management, grounded conversations with citations, and frontend tests.
 
 ## Authentication design
 
@@ -22,6 +22,15 @@ React and TypeScript client for the AI Support Agent backend. It provides a resp
 - The paginated list reflects the backend lifecycle states: `UPLOADED`, `PROCESSING`, `READY`, and `FAILED`.
 - PostgreSQL and backend file storage remain the source of truth; documents are never persisted in browser storage.
 
+## Conversation design
+
+- Every authenticated user can create and reopen their own conversations under `/app/conversations`.
+- Conversation and message history are loaded from the Spring API; the browser does not treat local state as durable storage.
+- Sending a question appends the user/assistant pair returned by the backend, so the UI reflects exactly what was persisted.
+- Grounded answers show expandable citation cards with the source document, page number, excerpt, and retrieval similarity.
+- Unsupported answers are presented as knowledge gaps rather than being visually implied to have evidence.
+- The first 100 chronological messages are loaded for this demo. A production chat with very long histories should add cursor-based history loading.
+
 ## Local development
 
 The Spring Boot API must be available at `http://localhost:8080`.
@@ -42,6 +51,8 @@ Available routes:
 | `/login` | User login |
 | `/register` | Employee registration |
 | `/app` | Authenticated workspace |
+| `/app/conversations` | Owned conversation list and creation |
+| `/app/conversations/:conversationId` | Persisted chat history, questions, and citations |
 | `/app/documents` | Administrator document management |
 
 ## Commands

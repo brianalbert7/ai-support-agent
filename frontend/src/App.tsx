@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { AdminRoute, ProtectedRoute, PublicOnlyRoute } from './auth/RouteGuards'
 import WorkspaceLayout from './components/WorkspaceLayout'
 import AccessDeniedPage from './pages/AccessDeniedPage'
+import ConversationsPage from './pages/ConversationsPage'
 import DashboardPage from './pages/DashboardPage'
 import DocumentsPage from './pages/DocumentsPage'
 import HomePage from './pages/HomePage'
@@ -25,6 +26,8 @@ export default function App() {
           <Route element={<WorkspaceLayout />}>
             <Route path="/app" element={<DashboardPage />} />
             <Route path="/app/access-denied" element={<AccessDeniedPage />} />
+            <Route path="/app/conversations" element={<ConversationsPage />} />
+            <Route path="/app/conversations/:conversationId" element={<ConversationsPage />} />
             <Route element={<AdminRoute />}>
               <Route path="/app/documents" element={<DocumentsPage />} />
             </Route>
