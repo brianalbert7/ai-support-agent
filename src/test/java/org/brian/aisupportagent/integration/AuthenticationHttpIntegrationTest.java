@@ -1153,12 +1153,7 @@ class AuthenticationHttpIntegrationTest {
         String answer = "Full-time employees receive twenty vacation days each year [1].";
         String followUpQuestion = "What about part-time employees?";
         String followUpAnswer = "The source only specifies the full-time allowance [1].";
-        String contextualRetrievalQuery = """
-                PRIOR USER QUESTIONS:
-                - How many vacation days do full-time employees receive?
-                CURRENT QUESTION:
-                What about part-time employees?
-                """.trim();
+        String rewrittenRetrievalQuery = "part-time employee vacation allowance";
         when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
             List<String> inputs = invocation.getArgument(0);
             return inputs.stream()
@@ -1167,10 +1162,11 @@ class AuthenticationHttpIntegrationTest {
         });
         when(embeddingModel.embed(eq(question)))
                 .thenReturn(testEmbeddingVector(8, 1.0f, 9, 0.0f));
-        when(embeddingModel.embed(eq(contextualRetrievalQuery)))
+        when(embeddingModel.embed(eq(rewrittenRetrievalQuery)))
                 .thenReturn(testEmbeddingVector(8, 1.0f, 9, 0.0f));
         when(chatModel.call(any(Prompt.class))).thenReturn(
                 chatResponse(answer),
+                chatResponse(rewrittenRetrievalQuery),
                 chatResponse(followUpAnswer)
         );
         AuthenticationTokens ownerTokens = register(uniqueEmail());
@@ -1236,7 +1232,14 @@ class AuthenticationHttpIntegrationTest {
                         .value(documentId.toString()));
 
         ArgumentCaptor<Prompt> promptCaptor = ArgumentCaptor.forClass(Prompt.class);
-        verify(chatModel, times(2)).call(promptCaptor.capture());
+        verify(chatModel, times(3)).call(promptCaptor.capture());
+        Prompt rewritePrompt = promptCaptor.getAllValues().get(1);
+        assertEquals(2, rewritePrompt.getInstructions().size());
+        assertTrue(rewritePrompt.getSystemMessage().getText().contains(
+                "standalone semantic search"
+        ));
+        assertTrue(rewritePrompt.getUserMessage().getText().contains(question));
+        assertTrue(rewritePrompt.getUserMessage().getText().contains(followUpQuestion));
         Prompt followUpPrompt = promptCaptor.getAllValues().getLast();
         assertEquals(4, followUpPrompt.getInstructions().size());
         assertTrue(followUpPrompt.getInstructions().get(1).getText().contains(question));

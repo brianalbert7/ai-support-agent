@@ -57,6 +57,7 @@ public class KnowledgeAnswerService {
     private static final Pattern CITATION_PATTERN = Pattern.compile("\\[(\\d+)]");
 
     private final KnowledgeSearchService knowledgeSearchService;
+    private final ConversationQueryRewriterService queryRewriterService;
     private final ChatModel chatModel;
 
     @PreAuthorize("isAuthenticated()")
@@ -69,12 +70,7 @@ public class KnowledgeAnswerService {
             KnowledgeSearchRequest request,
             List<ConversationContextMessage> history
     ) {
-        KnowledgeSearchResponse searchResponse = history.isEmpty()
-                ? knowledgeSearchService.search(request)
-                : knowledgeSearchService.search(
-                        request,
-                        buildContextualRetrievalQuery(request.question().trim(), history)
-                );
+        KnowledgeSearchResponse searchResponse = search(request, history);
         if (searchResponse.results().isEmpty()) {
             return insufficientContextResponse(searchResponse.question());
         }
@@ -102,19 +98,26 @@ public class KnowledgeAnswerService {
         }
     }
 
-    private String buildContextualRetrievalQuery(
-            String currentQuestion,
+    private KnowledgeSearchResponse search(
+            KnowledgeSearchRequest request,
             List<ConversationContextMessage> history
     ) {
-        StringBuilder query = new StringBuilder("PRIOR USER QUESTIONS:\n");
-        history.stream()
-                .filter(message -> message.role() == ConversationMessageRole.USER)
-                .forEach(message -> query.append("- ")
-                        .append(message.content())
-                        .append('\n'));
-        return query.append("CURRENT QUESTION:\n")
-                .append(currentQuestion)
-                .toString();
+        if (history.isEmpty()) {
+            return knowledgeSearchService.search(request);
+        }
+
+        String originalQuestion = request.question().trim();
+        String rewrittenQuery = queryRewriterService.rewrite(originalQuestion, history);
+        KnowledgeSearchResponse rewrittenSearch = knowledgeSearchService.search(
+                request,
+                rewrittenQuery
+        );
+        if (!rewrittenSearch.results().isEmpty()
+                || rewrittenQuery.equals(originalQuestion)) {
+            return rewrittenSearch;
+        }
+
+        return knowledgeSearchService.search(request);
     }
 
     private List<Message> buildPrompt(

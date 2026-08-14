@@ -37,6 +37,9 @@ class KnowledgeAnswerServiceTest {
     private KnowledgeSearchService knowledgeSearchService;
 
     @Mock
+    private ConversationQueryRewriterService queryRewriterService;
+
+    @Mock
     private ChatModel chatModel;
 
     @InjectMocks
@@ -138,18 +141,15 @@ class KnowledgeAnswerServiceTest {
                         "Full-time employees receive twenty vacation days [1]."
                 )
         );
-        String retrievalQuery = """
-                PRIOR USER QUESTIONS:
-                - How many vacation days do full-time employees receive?
-                CURRENT QUESTION:
-                What about part-time employees?
-                """.trim();
+        String retrievalQuery = "part-time employee vacation allowance";
         KnowledgeSearchResultResponse source = source(
                 "Employee Handbook",
                 8,
                 "Part-time employees receive ten vacation days each year.",
                 0.88
         );
+        when(queryRewriterService.rewrite(request.question(), history))
+                .thenReturn(retrievalQuery);
         when(knowledgeSearchService.search(request, retrievalQuery)).thenReturn(
                 new KnowledgeSearchResponse(request.question(), List.of(source))
         );
@@ -190,6 +190,44 @@ class KnowledgeAnswerServiceTest {
                 "QUESTION:\nWhat about part-time employees?"
         ));
         assertTrue(prompt.getUserMessage().getText().contains("--- SOURCE 1 ---"));
+    }
+
+    @Test
+    void retriesOriginalQuestionWhenRewrittenQueryRetrievesNothing() {
+        KnowledgeSearchRequest request = new KnowledgeSearchRequest(
+                "Who is allowed to request one?",
+                3
+        );
+        List<ConversationContextMessage> history = List.of(
+                new ConversationContextMessage(
+                        ConversationMessageRole.USER,
+                        "How long are CloudDesk backups retained?"
+                )
+        );
+        String rewrittenQuery = "Who may request a CloudDesk restore?";
+        KnowledgeSearchResultResponse source = source(
+                "CloudDesk Guide",
+                2,
+                "Only a Workspace Administrator may request a restore.",
+                0.67
+        );
+        when(queryRewriterService.rewrite(request.question(), history))
+                .thenReturn(rewrittenQuery);
+        when(knowledgeSearchService.search(request, rewrittenQuery)).thenReturn(
+                new KnowledgeSearchResponse(request.question(), List.of())
+        );
+        when(knowledgeSearchService.search(request)).thenReturn(
+                new KnowledgeSearchResponse(request.question(), List.of(source))
+        );
+        when(chatModel.call(org.mockito.ArgumentMatchers.any(Prompt.class)))
+                .thenReturn(chatResponse("Only an administrator may request one [1]."));
+
+        KnowledgeAnswerResponse response = knowledgeAnswerService.answer(request, history);
+
+        assertTrue(response.grounded());
+        assertEquals("CloudDesk Guide", response.citations().getFirst().documentName());
+        verify(knowledgeSearchService).search(request, rewrittenQuery);
+        verify(knowledgeSearchService).search(request);
     }
 
     @Test

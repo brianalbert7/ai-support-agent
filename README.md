@@ -21,7 +21,7 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 - Configurable document chunking and batched OpenAI embeddings
 - PostgreSQL vector storage and cosine-similarity search with pgvector
 - Grounded OpenAI responses with validated source citations
-- User-owned conversations with bounded follow-up context
+- User-owned conversations with bounded follow-up context and standalone query rewriting
 - Persisted user messages, AI responses, and citation history
 - Request validation and centralized JSON exception handling
 - Flyway database migrations
@@ -93,7 +93,9 @@ sequenceDiagram
     User->>API: Ask a question
     API->>Conversation: Verify conversation ownership
     Conversation->>DB: Load bounded recent history
-    Conversation->>Search: Build contextual retrieval query
+    Conversation->>AI: Rewrite follow-up as a standalone search query
+    AI-->>Conversation: Rewritten query or safe original fallback
+    Conversation->>Search: Submit retrieval query
     Search->>AI: Embed retrieval query
     Search->>DB: Cosine-similarity search
     DB-->>Search: Relevant chunks with document and page
@@ -104,7 +106,7 @@ sequenceDiagram
     API-->>User: Grounded response with cited sources
 ```
 
-Retrieved document text and conversation history are treated as untrusted input. The system prompt tells the model not to follow instructions found inside those sources, and the application rejects missing or unknown citations.
+The original user question is preserved for history and answer generation; the rewritten form is used only for retrieval. Invalid or failed rewrites fall back to the original question, and an empty rewritten search is retried once with the original. Retrieved document text and conversation history are treated as untrusted input. The system prompts tell the model not to follow instructions found inside those sources, and the application rejects missing or unknown citations.
 
 ## Package structure
 
@@ -367,7 +369,7 @@ Required variables have no application default. Optional values are shown with t
 | `DOCUMENT_MAX_REQUEST_SIZE` | No | `11MB` | Multipart request limit |
 | `RAG_CHUNK_TARGET_TOKENS` | No | `500` | Target chunk size |
 | `RAG_SEARCH_DEFAULT_RESULTS` | No | `5` | Retrieved source limit |
-| `RAG_SEARCH_MINIMUM_SIMILARITY` | No | `0.70` | Minimum cosine similarity |
+| `RAG_SEARCH_MINIMUM_SIMILARITY` | No | `0.55` | Minimum cosine similarity |
 | `CONVERSATION_HISTORY_MAX_MESSAGES` | No | `10` | Context message limit |
 | `CONVERSATION_HISTORY_MAX_CHARACTERS` | No | `12000` | Context character limit |
 | `SPRINGDOC_API_DOCS_ENABLED` | No | `true` | Enable OpenAPI JSON |
@@ -385,7 +387,7 @@ Run the complete suite:
 
 The test strategy includes:
 
-- Focused unit tests for authentication, tokens, storage, extraction, chunking, embeddings, retrieval, answers, and conversations
+- Focused unit tests for authentication, tokens, storage, extraction, chunking, embeddings, retrieval, query rewriting, answers, and conversations
 - Bean Validation tests for API request contracts
 - MockMvc integration tests for HTTP status codes, JSON contracts, JWT security, role authorization, ownership boundaries, document lifecycle, RAG flows, and OpenAPI
 - Testcontainers with a real PostgreSQL/pgvector database and Flyway migrations
@@ -461,6 +463,7 @@ Confirm that `OPENAI_API_KEY` is present, the account can use the configured mod
 - Administrator provisioning is manual in local development and needs a controlled audited workflow.
 - The React client currently covers authentication and administrator document ingestion; the grounded conversation interface is the next frontend milestone, while Swagger UI remains available for every endpoint.
 - Compose provides a strong single-host deployment baseline, but production still needs managed secrets, TLS, an image registry, backups, and an orchestration or hosting strategy.
+- Contextual follow-ups add a small query-rewrite model call; production usage should measure its retrieval-quality benefit against added latency and token cost.
 - Retrieval quality should eventually be evaluated with a repeatable question-and-answer dataset rather than intuition alone.
 
 ## FAQs
