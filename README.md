@@ -1,8 +1,10 @@
 # AI Support Agent
 
-A production-minded Spring Boot application for an internal knowledge assistant. Administrators upload PDF documents, and authenticated employees ask questions that are answered only from the uploaded knowledge base with document and page citations. A React and TypeScript client lives in `frontend/` and is being developed as an independently buildable interface for the API.
+A production-minded Spring Boot application for an internal knowledge assistant. Administrators upload PDF documents, and authenticated employees ask questions that are answered only from the uploaded knowledge base with document and page citations. An independently buildable React and TypeScript client in `frontend/` provides the browser-based product experience.
 
 The project demonstrates a complete retrieval-augmented generation (RAG) workflow rather than sending an ungrounded prompt directly to a language model.
+
+![AI Support Agent product landing page](output/screenshots/product-home.png)
 
 ## Why this project exists
 
@@ -32,7 +34,27 @@ This application turns company PDFs into a searchable knowledge base. It retriev
 - GitHub Actions CI for tests and production-image build verification
 - Multi-stage, non-root application container with a read-only root filesystem
 - Docker Compose stack for the application, PostgreSQL/pgvector, and pgAdmin
-- Independently buildable React, TypeScript, and Vite client with authentication and admin document management
+- Independently buildable React, TypeScript, and Vite client with authentication, document management, grounded conversations, and expandable citations
+
+## Application preview
+
+### Grounded conversations
+
+Authenticated users can create conversation sessions, ask questions, continue contextual follow-ups, and reopen their persisted history.
+
+![Grounded CloudDesk conversation](output/screenshots/conversation-overview.png)
+
+### Verifiable citation evidence
+
+Every supported answer identifies the retrieved document and page. Users can expand a citation to inspect the exact source excerpt and retrieval similarity.
+
+![Expanded citation evidence](output/screenshots/expanded-citation-overview.png)
+
+### Administrator document management
+
+Administrators upload trusted PDFs and process them into page-aware chunks and vector embeddings. Lifecycle states make ingestion failures visible and retryable.
+
+![Administrator document management](output/screenshots/document-management.png)
 
 ## Architecture
 
